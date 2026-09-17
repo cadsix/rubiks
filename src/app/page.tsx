@@ -41,14 +41,12 @@ export default function Home() {
   const isSolved = useMemo(() => isCubeSolved(cubeState), [cubeState]);
 
   const handlePaint = useCallback((face: Face, index: number) => {
-    if (lockCenters && index === 4) return;
-
     setCubeState((prev) => {
       const next = cloneCubeState(prev);
       next[face][index] = activeColor;
       return next;
     });
-  }, [activeColor, lockCenters]);
+  }, [activeColor]);
 
   const handleApplyMove = useCallback((move: Move) => {
     setAnimatingMove(move);

@@ -2,16 +2,15 @@
 
 import React, { useState } from 'react';
 import { CubeColor, CubeState, Face } from '@/lib/cube/types';
-import { COLOR_HEX, STANDARD_FACE_COLORS } from '@/lib/cube/constants';
+import { COLOR_HEX } from '@/lib/cube/constants';
 import { playClickSound } from '@/lib/audio/soundEffects';
-import { Lock, Unlock } from 'lucide-react';
 
 interface CubeNet2DProps {
   state: CubeState;
   activeColor: CubeColor;
   onPaint: (face: Face, index: number) => void;
-  lockCenters: boolean;
-  onToggleLockCenters: () => void;
+  lockCenters?: boolean;
+  onToggleLockCenters?: () => void;
 }
 
 interface FaceBoxProps {
@@ -19,7 +18,6 @@ interface FaceBoxProps {
   tiles: CubeColor[];
   activeColor: CubeColor;
   onPaint: (face: Face, index: number) => void;
-  lockCenters: boolean;
   isDragging: boolean;
   setIsDragging: (val: boolean) => void;
 }
@@ -27,22 +25,17 @@ interface FaceBoxProps {
 const FaceBox: React.FC<FaceBoxProps> = ({
   face,
   tiles,
-  activeColor,
   onPaint,
-  lockCenters,
   isDragging,
   setIsDragging,
 }) => {
-  const isLockedCenter = (idx: number) => lockCenters && idx === 4;
-
   const handleTileClick = (idx: number) => {
-    if (isLockedCenter(idx)) return;
     playClickSound();
     onPaint(face, idx);
   };
 
   const handlePointerEnter = (idx: number) => {
-    if (isDragging && !isLockedCenter(idx)) {
+    if (isDragging) {
       playClickSound();
       onPaint(face, idx);
     }
@@ -57,6 +50,7 @@ const FaceBox: React.FC<FaceBoxProps> = ({
         <span
           className="w-2 h-2 rounded-full border border-neutral-300 shadow-2xs"
           style={{ backgroundColor: COLOR_HEX[tiles[4]] }}
+          title={`Center: ${tiles[4]}`}
         />
       </div>
 
@@ -65,7 +59,7 @@ const FaceBox: React.FC<FaceBoxProps> = ({
         onPointerDown={() => setIsDragging(true)}
       >
         {tiles.map((color, idx) => {
-          const locked = isLockedCenter(idx);
+          const isCenter = idx === 4;
           const hex = COLOR_HEX[color] || '#e5e5e5';
 
           return (
@@ -74,23 +68,15 @@ const FaceBox: React.FC<FaceBoxProps> = ({
               type="button"
               onClick={() => handleTileClick(idx)}
               onPointerEnter={() => handlePointerEnter(idx)}
-              className={`w-7 h-7 sm:w-8 sm:h-8 rounded-[5px] transition-all flex items-center justify-center border ${
-                locked
-                  ? 'cursor-not-allowed border-neutral-300'
-                  : 'hover:scale-[1.05] hover:z-10 border-black/10 active:scale-95 shadow-xs'
-              }`}
+              className="w-7 h-7 sm:w-8 sm:h-8 rounded-[5px] transition-all flex items-center justify-center border hover:scale-[1.05] hover:z-10 border-black/10 active:scale-95 shadow-xs cursor-pointer"
               style={{
                 backgroundColor: hex,
                 boxShadow: 'inset 0 1px 1px rgba(255,255,255,0.4)',
               }}
-              title={
-                locked
-                  ? `Center (Locked to ${STANDARD_FACE_COLORS[face]})`
-                  : `Face ${face} #${idx + 1}`
-              }
+              title={`Face ${face} #${idx + 1}${isCenter ? ' (Center)' : ''}`}
             >
-              {locked && (
-                <Lock className="w-2.5 h-2.5 text-neutral-600 drop-shadow-xs" />
+              {isCenter && (
+                <div className="w-1.5 h-1.5 rounded-full bg-black/20" />
               )}
             </button>
           );
@@ -104,8 +90,6 @@ export const CubeNet2D: React.FC<CubeNet2DProps> = ({
   state,
   activeColor,
   onPaint,
-  lockCenters,
-  onToggleLockCenters,
 }) => {
   const [isDragging, setIsDragging] = useState(false);
 
@@ -120,19 +104,9 @@ export const CubeNet2D: React.FC<CubeNet2DProps> = ({
         <span className="text-xs font-semibold text-neutral-800">
           2D Net Editor
         </span>
-
-        <button
-          onClick={onToggleLockCenters}
-          className={`flex items-center gap-1 px-2 py-0.5 text-[11px] rounded-md font-medium border transition-colors shadow-2xs ${
-            lockCenters
-              ? 'bg-neutral-100 text-neutral-800 border-neutral-300'
-              : 'bg-white text-neutral-500 border-neutral-200 hover:text-neutral-800'
-          }`}
-          title={lockCenters ? 'Centers are locked to standard orientation' : 'Centers are free to customize'}
-        >
-          {lockCenters ? <Lock className="w-3 h-3 text-neutral-600" /> : <Unlock className="w-3 h-3 text-neutral-400" />}
-          <span>{lockCenters ? 'Centers Locked' : 'Centers Free'}</span>
-        </button>
+        <span className="text-[11px] text-neutral-400">
+          Click or drag any tile
+        </span>
       </div>
 
       {/* Unfolded Net Grid */}
@@ -144,7 +118,6 @@ export const CubeNet2D: React.FC<CubeNet2DProps> = ({
             tiles={state.U}
             activeColor={activeColor}
             onPaint={onPaint}
-            lockCenters={lockCenters}
             isDragging={isDragging}
             setIsDragging={setIsDragging}
           />
@@ -157,7 +130,6 @@ export const CubeNet2D: React.FC<CubeNet2DProps> = ({
             tiles={state.L}
             activeColor={activeColor}
             onPaint={onPaint}
-            lockCenters={lockCenters}
             isDragging={isDragging}
             setIsDragging={setIsDragging}
           />
@@ -166,7 +138,6 @@ export const CubeNet2D: React.FC<CubeNet2DProps> = ({
             tiles={state.F}
             activeColor={activeColor}
             onPaint={onPaint}
-            lockCenters={lockCenters}
             isDragging={isDragging}
             setIsDragging={setIsDragging}
           />
@@ -175,7 +146,6 @@ export const CubeNet2D: React.FC<CubeNet2DProps> = ({
             tiles={state.R}
             activeColor={activeColor}
             onPaint={onPaint}
-            lockCenters={lockCenters}
             isDragging={isDragging}
             setIsDragging={setIsDragging}
           />
@@ -184,7 +154,6 @@ export const CubeNet2D: React.FC<CubeNet2DProps> = ({
             tiles={state.B}
             activeColor={activeColor}
             onPaint={onPaint}
-            lockCenters={lockCenters}
             isDragging={isDragging}
             setIsDragging={setIsDragging}
           />
@@ -197,7 +166,6 @@ export const CubeNet2D: React.FC<CubeNet2DProps> = ({
             tiles={state.D}
             activeColor={activeColor}
             onPaint={onPaint}
-            lockCenters={lockCenters}
             isDragging={isDragging}
             setIsDragging={setIsDragging}
           />
