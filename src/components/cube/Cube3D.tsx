@@ -322,10 +322,19 @@ export const Cube3D: React.FC<Cube3DProps> = ({
     return () => clearTimeout(timer);
   }, [animatingMove, animationSpeed, onAnimationComplete]);
 
+  const pointerStartPosRef = useRef({ x: 0, y: 0 });
+  const totalDragDistRef = useRef(0);
+  const pointerStartTimeRef = useRef(0);
+
   const handlePointerDown = (e: React.PointerEvent<HTMLDivElement>) => {
     isDraggingRef.current = true;
+    pointerStartPosRef.current = { x: e.clientX, y: e.clientY };
     prevPointerPosRef.current = { x: e.clientX, y: e.clientY };
-    (e.target as HTMLElement).setPointerCapture(e.pointerId);
+    totalDragDistRef.current = 0;
+    pointerStartTimeRef.current = Date.now();
+    try {
+      (e.target as HTMLElement).setPointerCapture(e.pointerId);
+    } catch (_) {}
   };
 
   const handlePointerMove = (e: React.PointerEvent<HTMLDivElement>) => {
@@ -333,6 +342,7 @@ export const Cube3D: React.FC<Cube3DProps> = ({
 
     const deltaX = e.clientX - prevPointerPosRef.current.x;
     const deltaY = e.clientY - prevPointerPosRef.current.y;
+    totalDragDistRef.current += Math.hypot(deltaX, deltaY);
 
     orbitAngleRef.current.theta -= deltaX * 0.008;
     orbitAngleRef.current.phi = Math.max(-Math.PI / 2.3, Math.min(Math.PI / 2.3, orbitAngleRef.current.phi + deltaY * 0.008));
@@ -342,13 +352,19 @@ export const Cube3D: React.FC<Cube3DProps> = ({
   };
 
   const handlePointerUp = (e: React.PointerEvent<HTMLDivElement>) => {
-    const wasDragging = Math.hypot(e.clientX - prevPointerPosRef.current.x, e.clientY - prevPointerPosRef.current.y) > 4;
+    const distFromStart = Math.hypot(e.clientX - pointerStartPosRef.current.x, e.clientY - pointerStartPosRef.current.y);
+    const totalMoved = totalDragDistRef.current;
+    const elapsed = Date.now() - pointerStartTimeRef.current;
+
     isDraggingRef.current = false;
     try {
       (e.target as HTMLElement).releasePointerCapture(e.pointerId);
     } catch (_) {}
 
-    if (!wasDragging) {
+    // Only register as click if pointer barely moved (pure tap)
+    const isPureClick = distFromStart <= 5 && totalMoved <= 5 && elapsed < 400;
+
+    if (isPureClick) {
       const hit = getRaycastHit(e.clientX, e.clientY);
       if (hit && onFaceletClick) {
         playClickSound();
