@@ -1,19 +1,25 @@
 'use client';
 
-import React, { useEffect, useRef, useState } from 'react';
+import React, { useEffect, useRef, useState, useCallback } from 'react';
 import * as THREE from 'three';
 import { CubeColor, CubeState, Face, Move } from '@/lib/cube/types';
-import { COLOR_HEX } from '@/lib/cube/constants';
+import { COLOR_HEX, MOVE_DESCRIPTIONS, FACE_NAMES } from '@/lib/cube/constants';
 import { playTurnSound, playClickSound } from '@/lib/audio/soundEffects';
-import { ZoomIn, ZoomOut, RefreshCw } from 'lucide-react';
+import { ZoomIn, ZoomOut, RefreshCw, Compass } from 'lucide-react';
+
+export interface AnimatingMovePayload {
+  move: Move;
+  id: number;
+  duration?: number;
+}
 
 interface Cube3DProps {
   state: CubeState;
   activeColor?: CubeColor;
   onFaceletClick?: (face: Face, index: number) => void;
-  animatingMove?: Move | null;
+  animatingMove?: AnimatingMovePayload | null;
   onAnimationComplete?: () => void;
-  animationSpeed?: number;
+  hintMove?: Move | null;
 }
 
 interface FaceletMapping {
@@ -122,26 +128,57 @@ for (let r = 0; r < 3; r++) {
   }
 }
 
+// Color palette mapping
+const COLOR_VALUES: Record<CubeColor, number> = {
+  white: 0xffffff,
+  red: 0xef4444,
+  green: 0x22c55e,
+  yellow: 0xeab308,
+  orange: 0xf97316,
+  blue: 0x3b82f6,
+};
+
 export const Cube3D: React.FC<Cube3DProps> = ({
   state,
   onFaceletClick,
   animatingMove,
   onAnimationComplete,
-  animationSpeed = 250,
+  hintMove,
 }) => {
   const containerRef = useRef<HTMLDivElement>(null);
   const rendererRef = useRef<THREE.WebGLRenderer | null>(null);
   const sceneRef = useRef<THREE.Scene | null>(null);
   const cameraRef = useRef<THREE.PerspectiveCamera | null>(null);
   const rootGroupRef = useRef<THREE.Group | null>(null);
-  const stickersRef = useRef<Map<string, THREE.Mesh>>(new Map());
+  const cubieGroupsRef = useRef<THREE.Group[]>([]);
+  const stickerMeshesRef = useRef<Map<string, THREE.Mesh>>(new Map());
+  const hintGroupRef = useRef<THREE.Group | null>(null);
+
   const isDraggingRef = useRef(false);
   const prevPointerPosRef = useRef({ x: 0, y: 0 });
+  const pointerStartPosRef = useRef({ x: 0, y: 0 });
+  const totalDragDistRef = useRef(0);
+  const pointerStartTimeRef = useRef(0);
+
   const autoRotateRef = useRef(false);
   const [autoRotate, setAutoRotate] = useState(false);
+  const isAnimatingRef = useRef(false);
+  const currentAnimationIdRef = useRef<number | null>(null);
 
-  const orbitAngleRef = useRef({ theta: Math.PI / 4, phi: Math.PI / 6, distance: 7.5 });
+  const orbitAngleRef = useRef({ theta: Math.PI / 4, phi: Math.PI / 6.5, distance: 7.6 });
 
+  // Update camera position helper
+  const updateCameraPosition = useCallback(() => {
+    if (!cameraRef.current) return;
+    const { theta, phi, distance } = orbitAngleRef.current;
+    const x = distance * Math.sin(theta) * Math.cos(phi);
+    const y = distance * Math.sin(phi);
+    const z = distance * Math.cos(theta) * Math.cos(phi);
+    cameraRef.current.position.set(x, y, z);
+    cameraRef.current.lookAt(0, 0, 0);
+  }, []);
+
+  // Initialize Three.js Scene
   useEffect(() => {
     if (!containerRef.current) return;
 
@@ -151,11 +188,15 @@ export const Cube3D: React.FC<Cube3DProps> = ({
     const scene = new THREE.Scene();
     sceneRef.current = scene;
 
-    const camera = new THREE.PerspectiveCamera(38, width / (height || 1), 0.1, 100);
+    const camera = new THREE.PerspectiveCamera(36, width / (height || 1), 0.1, 100);
     cameraRef.current = camera;
     updateCameraPosition();
 
-    const renderer = new THREE.WebGLRenderer({ antialias: true, alpha: true, powerPreference: 'high-performance' });
+    const renderer = new THREE.WebGLRenderer({
+      antialias: true,
+      alpha: true,
+      powerPreference: 'high-performance',
+    });
     renderer.setSize(width, height);
     renderer.setPixelRatio(Math.min(window.devicePixelRatio || 1, 2));
     renderer.shadowMap.enabled = true;
@@ -167,83 +208,102 @@ export const Cube3D: React.FC<Cube3DProps> = ({
     }
     containerRef.current.appendChild(renderer.domElement);
 
-    // Studio lighting for clean product look
-    const ambientLight = new THREE.AmbientLight(0xffffff, 1.8);
+    // Studio lighting
+    const ambientLight = new THREE.AmbientLight(0xffffff, 1.9);
     scene.add(ambientLight);
 
-    const dirLight1 = new THREE.DirectionalLight(0xffffff, 1.6);
-    dirLight1.position.set(10, 15, 12);
+    const dirLight1 = new THREE.DirectionalLight(0xffffff, 1.5);
+    dirLight1.position.set(12, 16, 14);
     scene.add(dirLight1);
 
-    const dirLight2 = new THREE.DirectionalLight(0xffffff, 1.0);
-    dirLight2.position.set(-10, -8, -10);
+    const dirLight2 = new THREE.DirectionalLight(0xffffff, 0.9);
+    dirLight2.position.set(-12, -10, -12);
     scene.add(dirLight2);
 
     const rootGroup = new THREE.Group();
     rootGroupRef.current = rootGroup;
     scene.add(rootGroup);
 
-    // 26 cubies with matte dark frame
-    const cubieGeo = new THREE.BoxGeometry(0.96, 0.96, 0.96);
+    // Move Hint Group
+    const hintGroup = new THREE.Group();
+    hintGroupRef.current = hintGroup;
+    scene.add(hintGroup);
+
+    // Construct 26 cubies with speedcube black core and glossy stickers
+    const cubieGeo = new THREE.BoxGeometry(0.94, 0.94, 0.94);
     const cubieMat = new THREE.MeshStandardMaterial({
-      color: 0x1f2937,
-      roughness: 0.35,
+      color: 0x171717,
+      roughness: 0.6,
       metalness: 0.1,
     });
 
-    const stickerGeo = new THREE.PlaneGeometry(0.86, 0.86);
-    const stickers = new Map<string, THREE.Mesh>();
+    const stickerGeo = new THREE.PlaneGeometry(0.85, 0.85);
+    const cubieGroups: THREE.Group[] = [];
+    const stickersMap = new Map<string, THREE.Mesh>();
 
     for (let x = -1; x <= 1; x++) {
       for (let y = -1; y <= 1; y++) {
         for (let z = -1; z <= 1; z++) {
           if (x === 0 && y === 0 && z === 0) continue;
 
-          const cubie = new THREE.Mesh(cubieGeo, cubieMat);
-          cubie.position.set(x, y, z);
-          rootGroup.add(cubie);
+          const cubieGroup = new THREE.Group();
+          cubieGroup.position.set(x, y, z);
+          cubieGroup.userData = { gridX: x, gridY: y, gridZ: z };
+
+          // Plastic core
+          const boxMesh = new THREE.Mesh(cubieGeo, cubieMat);
+          cubieGroup.add(boxMesh);
+
+          // Find matching stickers for this canonical position
+          FACELET_MAP.filter((f) => f.cubiePos[0] === x && f.cubiePos[1] === y && f.cubiePos[2] === z).forEach((item) => {
+            const colorName = state[item.face][item.index] || 'white';
+            const colorHex = COLOR_VALUES[colorName] || 0xffffff;
+
+            const stickerMat = new THREE.MeshStandardMaterial({
+              color: colorHex,
+              roughness: 0.18,
+              metalness: 0.05,
+              side: THREE.FrontSide,
+            });
+
+            const sticker = new THREE.Mesh(stickerGeo, stickerMat);
+            sticker.position.set(
+              item.normal[0] * 0.478,
+              item.normal[1] * 0.478,
+              item.normal[2] * 0.478
+            );
+            sticker.rotation.set(item.rotation[0], item.rotation[1], item.rotation[2]);
+            sticker.userData = {
+              face: item.face,
+              index: item.index,
+            };
+
+            cubieGroup.add(sticker);
+            stickersMap.set(`${item.face}_${item.index}`, sticker);
+          });
+
+          rootGroup.add(cubieGroup);
+          cubieGroups.push(cubieGroup);
         }
       }
     }
 
-    FACELET_MAP.forEach((item) => {
-      const colorHex = COLOR_HEX[state[item.face][item.index]] || '#ffffff';
-      const stickerMat = new THREE.MeshStandardMaterial({
-        color: new THREE.Color(colorHex),
-        roughness: 0.2,
-        metalness: 0.05,
-        side: THREE.FrontSide,
-      });
+    cubieGroupsRef.current = cubieGroups;
+    stickerMeshesRef.current = stickersMap;
 
-      const sticker = new THREE.Mesh(stickerGeo, stickerMat);
-      sticker.position.set(
-        item.cubiePos[0] + item.normal[0] * 0.485,
-        item.cubiePos[1] + item.normal[1] * 0.485,
-        item.cubiePos[2] + item.normal[2] * 0.485
-      );
-      sticker.rotation.set(item.rotation[0], item.rotation[1], item.rotation[2]);
-      sticker.userData = {
-        face: item.face,
-        index: item.index,
-      };
-
-      rootGroup.add(sticker);
-      stickers.set(`${item.face}_${item.index}`, sticker);
-    });
-    stickersRef.current = stickers;
-
+    // Animation Render Loop
     let animationFrameId: number;
-    const animate = () => {
-      animationFrameId = requestAnimationFrame(animate);
+    const renderLoop = () => {
+      animationFrameId = requestAnimationFrame(renderLoop);
 
-      if (autoRotateRef.current) {
-        orbitAngleRef.current.theta += 0.005;
+      if (autoRotateRef.current && !isAnimatingRef.current) {
+        orbitAngleRef.current.theta += 0.004;
         updateCameraPosition();
       }
 
       renderer.render(scene, camera);
     };
-    animate();
+    renderLoop();
 
     const updateSize = (w: number, h: number) => {
       if (!cameraRef.current || !rendererRef.current) return;
@@ -284,48 +344,189 @@ export const Cube3D: React.FC<Cube3DProps> = ({
         }
       }
     };
-  }, []);
+  }, [updateCameraPosition]);
 
-  const updateCameraPosition = () => {
-    if (!cameraRef.current) return;
-    const { theta, phi, distance } = orbitAngleRef.current;
-    const x = distance * Math.sin(theta) * Math.cos(phi);
-    const y = distance * Math.sin(phi);
-    const z = distance * Math.cos(theta) * Math.cos(phi);
-    cameraRef.current.position.set(x, y, z);
-    cameraRef.current.lookAt(0, 0, 0);
-  };
-
+  // Sync sticker colors to state when not animating
   useEffect(() => {
-    if (!stickersRef.current) return;
+    if (isAnimatingRef.current || !stickerMeshesRef.current) return;
 
     FACELET_MAP.forEach((item) => {
-      const sticker = stickersRef.current.get(`${item.face}_${item.index}`);
+      const sticker = stickerMeshesRef.current.get(`${item.face}_${item.index}`);
       if (sticker) {
-        const color = state[item.face][item.index];
-        const hex = COLOR_HEX[color] || '#ffffff';
-        (sticker.material as THREE.MeshStandardMaterial).color.set(hex);
+        const colorName = state[item.face][item.index];
+        const hex = COLOR_VALUES[colorName] || 0xffffff;
+        (sticker.material as THREE.MeshStandardMaterial).color.setHex(hex);
       }
     });
   }, [state]);
 
+  // Update Move Hint Overlay (Active face indicator)
   useEffect(() => {
-    if (!animatingMove) return;
+    if (!hintGroupRef.current) return;
+    const hintGroup = hintGroupRef.current;
+    while (hintGroup.children.length > 0) {
+      const obj = hintGroup.children[0];
+      hintGroup.remove(obj);
+    }
+
+    if (!hintMove) return;
+
+    const moveStr = hintMove.trim();
+    const face = moveStr[0] as Face;
+
+    // Create a subtle glowing square frame on the active face
+    const frameGeo = new THREE.RingGeometry(1.35, 1.48, 32);
+    const frameMat = new THREE.MeshBasicMaterial({
+      color: 0x2563eb,
+      side: THREE.DoubleSide,
+      transparent: true,
+      opacity: 0.65,
+    });
+    const frameMesh = new THREE.Mesh(frameGeo, frameMat);
+
+    switch (face) {
+      case 'U':
+        frameMesh.position.set(0, 1.55, 0);
+        frameMesh.rotation.set(-Math.PI / 2, 0, 0);
+        break;
+      case 'D':
+        frameMesh.position.set(0, -1.55, 0);
+        frameMesh.rotation.set(Math.PI / 2, 0, 0);
+        break;
+      case 'F':
+        frameMesh.position.set(0, 0, 1.55);
+        frameMesh.rotation.set(0, 0, 0);
+        break;
+      case 'B':
+        frameMesh.position.set(0, 0, -1.55);
+        frameMesh.rotation.set(0, Math.PI, 0);
+        break;
+      case 'L':
+        frameMesh.position.set(-1.55, 0, 0);
+        frameMesh.rotation.set(0, -Math.PI / 2, 0);
+        break;
+      case 'R':
+        frameMesh.position.set(1.55, 0, 0);
+        frameMesh.rotation.set(0, Math.PI / 2, 0);
+        break;
+    }
+
+    hintGroup.add(frameMesh);
+  }, [hintMove]);
+
+  // Physical 3D Slice Rotation Engine
+  useEffect(() => {
+    if (!animatingMove || !rootGroupRef.current) return;
+
+    // Check if this animation ID was already handled
+    if (currentAnimationIdRef.current === animatingMove.id) return;
+    currentAnimationIdRef.current = animatingMove.id;
+
+    const moveStr = animatingMove.move.trim();
+    const face = moveStr[0] as Face;
+    const isPrime = moveStr.includes("'");
+    const isDouble = moveStr.includes('2');
+    const duration = animatingMove.duration || 260;
+
+    isAnimatingRef.current = true;
     playTurnSound();
 
-    const timer = setTimeout(() => {
-      if (onAnimationComplete) {
-        onAnimationComplete();
+    // Determine target axis, matching slice cubies, and target rotation angle
+    let axis: 'x' | 'y' | 'z' = 'y';
+    let targetAngle = -Math.PI / 2;
+    let matchPos = (pos: THREE.Vector3) => Math.round(pos.y) === 1;
+
+    switch (face) {
+      case 'U':
+        axis = 'y';
+        matchPos = (pos) => Math.round(pos.y) === 1;
+        targetAngle = isDouble ? -Math.PI : isPrime ? Math.PI / 2 : -Math.PI / 2;
+        break;
+      case 'D':
+        axis = 'y';
+        matchPos = (pos) => Math.round(pos.y) === -1;
+        targetAngle = isDouble ? Math.PI : isPrime ? -Math.PI / 2 : Math.PI / 2;
+        break;
+      case 'F':
+        axis = 'z';
+        matchPos = (pos) => Math.round(pos.z) === 1;
+        targetAngle = isDouble ? -Math.PI : isPrime ? Math.PI / 2 : -Math.PI / 2;
+        break;
+      case 'B':
+        axis = 'z';
+        matchPos = (pos) => Math.round(pos.z) === -1;
+        targetAngle = isDouble ? Math.PI : isPrime ? -Math.PI / 2 : Math.PI / 2;
+        break;
+      case 'R':
+        axis = 'x';
+        matchPos = (pos) => Math.round(pos.x) === 1;
+        targetAngle = isDouble ? -Math.PI : isPrime ? Math.PI / 2 : -Math.PI / 2;
+        break;
+      case 'L':
+        axis = 'x';
+        matchPos = (pos) => Math.round(pos.x) === -1;
+        targetAngle = isDouble ? Math.PI : isPrime ? -Math.PI / 2 : Math.PI / 2;
+        break;
+    }
+
+    const root = rootGroupRef.current;
+    const pivot = new THREE.Group();
+    root.add(pivot);
+
+    // Filter the 9 cubies for this face slice
+    const sliceCubies = cubieGroupsRef.current.filter((c) => matchPos(c.position));
+
+    sliceCubies.forEach((cubie) => {
+      pivot.attach(cubie);
+    });
+
+    const startTime = performance.now();
+
+    // Smooth ease-in-out cubic curve
+    const easeInOut = (t: number) => (t < 0.5 ? 4 * t * t * t : 1 - Math.pow(-2 * t + 2, 3) / 2);
+
+    const animateSlice = (now: number) => {
+      const elapsed = now - startTime;
+      const progress = Math.min(1, elapsed / duration);
+      const eased = easeInOut(progress);
+
+      pivot.rotation[axis] = targetAngle * eased;
+
+      if (progress < 1) {
+        requestAnimationFrame(animateSlice);
+      } else {
+        // Complete physical slice rotation
+        pivot.rotation[axis] = targetAngle;
+        pivot.updateMatrixWorld(true);
+
+        // Detach cubies back to root
+        sliceCubies.forEach((cubie) => {
+          root.attach(cubie);
+        });
+
+        root.remove(pivot);
+
+        // Reset all 26 cubies to pristine canonical positions/orientations
+        // and let state update repaint them with exact colors
+        cubieGroupsRef.current.forEach((cubie) => {
+          const { gridX, gridY, gridZ } = cubie.userData;
+          cubie.position.set(gridX, gridY, gridZ);
+          cubie.rotation.set(0, 0, 0);
+          cubie.updateMatrix();
+        });
+
+        isAnimatingRef.current = false;
+
+        if (onAnimationComplete) {
+          onAnimationComplete();
+        }
       }
-    }, animationSpeed);
+    };
 
-    return () => clearTimeout(timer);
-  }, [animatingMove, animationSpeed, onAnimationComplete]);
+    requestAnimationFrame(animateSlice);
+  }, [animatingMove, onAnimationComplete]);
 
-  const pointerStartPosRef = useRef({ x: 0, y: 0 });
-  const totalDragDistRef = useRef(0);
-  const pointerStartTimeRef = useRef(0);
-
+  // Pointer drag & click handling
   const handlePointerDown = (e: React.PointerEvent<HTMLDivElement>) => {
     isDraggingRef.current = true;
     pointerStartPosRef.current = { x: e.clientX, y: e.clientY };
@@ -345,14 +546,20 @@ export const Cube3D: React.FC<Cube3DProps> = ({
     totalDragDistRef.current += Math.hypot(deltaX, deltaY);
 
     orbitAngleRef.current.theta -= deltaX * 0.008;
-    orbitAngleRef.current.phi = Math.max(-Math.PI / 2.3, Math.min(Math.PI / 2.3, orbitAngleRef.current.phi + deltaY * 0.008));
+    orbitAngleRef.current.phi = Math.max(
+      -Math.PI / 2.3,
+      Math.min(Math.PI / 2.3, orbitAngleRef.current.phi + deltaY * 0.008)
+    );
 
     updateCameraPosition();
     prevPointerPosRef.current = { x: e.clientX, y: e.clientY };
   };
 
   const handlePointerUp = (e: React.PointerEvent<HTMLDivElement>) => {
-    const distFromStart = Math.hypot(e.clientX - pointerStartPosRef.current.x, e.clientY - pointerStartPosRef.current.y);
+    const distFromStart = Math.hypot(
+      e.clientX - pointerStartPosRef.current.x,
+      e.clientY - pointerStartPosRef.current.y
+    );
     const totalMoved = totalDragDistRef.current;
     const elapsed = Date.now() - pointerStartTimeRef.current;
 
@@ -361,10 +568,10 @@ export const Cube3D: React.FC<Cube3DProps> = ({
       (e.target as HTMLElement).releasePointerCapture(e.pointerId);
     } catch (_) {}
 
-    // Only register as click if pointer barely moved (pure tap)
-    const isPureClick = distFromStart <= 5 && totalMoved <= 5 && elapsed < 400;
+    // Pure click criteria (not an orbit drag)
+    const isPureClick = distFromStart <= 6 && totalMoved <= 6 && elapsed < 400;
 
-    if (isPureClick) {
+    if (isPureClick && !isAnimatingRef.current) {
       const hit = getRaycastHit(e.clientX, e.clientY);
       if (hit && onFaceletClick) {
         playClickSound();
@@ -375,7 +582,10 @@ export const Cube3D: React.FC<Cube3DProps> = ({
 
   const handleWheel = (e: React.WheelEvent<HTMLDivElement>) => {
     e.preventDefault();
-    orbitAngleRef.current.distance = Math.max(4.5, Math.min(14, orbitAngleRef.current.distance + e.deltaY * 0.005));
+    orbitAngleRef.current.distance = Math.max(
+      4.5,
+      Math.min(14, orbitAngleRef.current.distance + e.deltaY * 0.005)
+    );
     updateCameraPosition();
   };
 
@@ -388,7 +598,7 @@ export const Cube3D: React.FC<Cube3DProps> = ({
     const raycaster = new THREE.Raycaster();
     raycaster.setFromCamera(new THREE.Vector2(x, y), cameraRef.current);
 
-    const stickerMeshes = Array.from(stickersRef.current.values());
+    const stickerMeshes = Array.from(stickerMeshesRef.current.values());
     const intersects = raycaster.intersectObjects(stickerMeshes, false);
 
     if (intersects.length > 0) {
@@ -401,7 +611,7 @@ export const Cube3D: React.FC<Cube3DProps> = ({
     return null;
   };
 
-  const setCameraPreset = (theta: number, phi: number, distance: number = 7.5) => {
+  const setCameraPreset = (theta: number, phi: number, distance: number = 7.6) => {
     orbitAngleRef.current = { theta, phi, distance };
     updateCameraPosition();
   };
@@ -426,7 +636,7 @@ export const Cube3D: React.FC<Cube3DProps> = ({
       {/* Camera View Presets */}
       <div className="absolute top-3 left-3 flex flex-wrap gap-1 z-10">
         <button
-          onClick={() => setCameraPreset(Math.PI / 4, Math.PI / 6)}
+          onClick={() => setCameraPreset(Math.PI / 4, Math.PI / 6.5)}
           className="px-2 py-1 text-xs font-medium rounded-md bg-white/90 hover:bg-neutral-50 text-neutral-700 hover:text-neutral-900 border border-neutral-200 transition shadow-xs backdrop-blur-xs"
         >
           Isometric
@@ -451,7 +661,18 @@ export const Cube3D: React.FC<Cube3DProps> = ({
         </button>
       </div>
 
-      {/* Zoom & Auto-Rotate */}
+      {/* Active Move Hint Tag */}
+      {hintMove && (
+        <div className="absolute bottom-3 right-3 flex items-center gap-2 px-3 py-1.5 rounded-lg bg-neutral-900/90 text-white border border-neutral-800 backdrop-blur-md shadow-md z-10 animate-fade-in">
+          <Compass className="w-3.5 h-3.5 text-blue-400 animate-spin" style={{ animationDuration: '4s' }} />
+          <div className="flex flex-col text-left">
+            <span className="text-[10px] font-mono text-neutral-400 leading-none">Turn Hint</span>
+            <span className="text-xs font-bold font-mono text-white mt-0.5">{hintMove}</span>
+          </div>
+        </div>
+      )}
+
+      {/* Zoom & Auto-Rotate Controls */}
       <div className="absolute top-3 right-3 flex items-center gap-1 z-10">
         <button
           onClick={toggleAutoRotate}
@@ -486,7 +707,7 @@ export const Cube3D: React.FC<Cube3DProps> = ({
         </button>
       </div>
 
-      {/* Subtle Hint */}
+      {/* Helper Footer Hint */}
       <div className="absolute bottom-2.5 left-3 text-[11px] text-neutral-400 font-mono pointer-events-none z-10">
         Orbit: drag | Paint: click tile
       </div>

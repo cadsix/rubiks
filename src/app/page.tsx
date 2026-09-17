@@ -1,6 +1,6 @@
 'use client';
 
-import React, { useState, useMemo, useCallback } from 'react';
+import React, { useState, useMemo, useCallback, useRef } from 'react';
 import dynamic from 'next/dynamic';
 import { CubeColor, CubeState, Face, Move, PresetPattern } from '@/lib/cube/types';
 import { getSolvedCubeState, cloneCubeState, applyMove, applyMoves, isCubeSolved } from '@/lib/cube/state';
@@ -17,13 +17,14 @@ import { CFOPGuideModal } from '@/components/solver/CFOPGuideModal';
 import { CameraScannerModal } from '@/components/scanner/CameraScannerModal';
 import { SpeedTimer } from '@/components/timer/SpeedTimer';
 import { playClickSound, playTurnSound } from '@/lib/audio/soundEffects';
+import { AnimatingMovePayload } from '@/components/cube/Cube3D';
 
 const Cube3D = dynamic(() => import('@/components/cube/Cube3D').then((mod) => mod.Cube3D), {
   ssr: false,
   loading: () => (
-    <div className="relative w-full h-[400px] sm:h-[460px] lg:h-[480px] flex flex-col items-center justify-center rounded-xl bg-white border border-neutral-200">
+    <div className="relative w-full h-[400px] sm:h-[460px] lg:h-[490px] flex flex-col items-center justify-center rounded-xl bg-white border border-neutral-200">
       <div className="w-5 h-5 border-2 border-neutral-300 border-t-neutral-800 rounded-full animate-spin" />
-      <span className="text-xs text-neutral-400 font-mono mt-2.5">Loading 3D View...</span>
+      <span className="text-xs text-neutral-400 font-mono mt-2.5">Loading 3D Studio...</span>
     </div>
   ),
 });
@@ -35,7 +36,12 @@ export default function Home() {
   const [activeTab, setActiveTab] = useState<'studio' | 'timer'>('studio');
   const [isCFOPGuideOpen, setIsCFOPGuideOpen] = useState(false);
   const [isScannerOpen, setIsScannerOpen] = useState(false);
-  const [animatingMove, setAnimatingMove] = useState<Move | null>(null);
+
+  // Animation orchestration state
+  const [animatingMove, setAnimatingMove] = useState<AnimatingMovePayload | null>(null);
+  const [isAnimating, setIsAnimating] = useState(false);
+  const [hintMove, setHintMove] = useState<Move | null>(null);
+  const onAnimationCompleteCallbackRef = useRef<(() => void) | null>(null);
 
   const validation = useMemo(() => validateCubeState(cubeState), [cubeState]);
   const isSolved = useMemo(() => isCubeSolved(cubeState), [cubeState]);
@@ -48,10 +54,44 @@ export default function Home() {
     });
   }, [activeColor]);
 
-  const handleApplyMove = useCallback((move: Move) => {
-    setAnimatingMove(move);
-    setCubeState((prev) => applyMove(prev, move));
+  // Request a physical 3D move animation
+  const handleAnimateMove = useCallback(
+    (move: Move, onComplete?: () => void, duration?: number) => {
+      setIsAnimating(true);
+      onAnimationCompleteCallbackRef.current = onComplete || null;
+      setAnimatingMove({
+        move,
+        id: Date.now() + Math.random(),
+        duration,
+      });
+    },
+    []
+  );
+
+  const handleAnimationComplete = useCallback(() => {
+    setIsAnimating(false);
+    setAnimatingMove(null);
+    if (onAnimationCompleteCallbackRef.current) {
+      const cb = onAnimationCompleteCallbackRef.current;
+      onAnimationCompleteCallbackRef.current = null;
+      cb();
+    }
   }, []);
+
+  // Manual move from buttons
+  const handleManualMove = useCallback(
+    (move: Move) => {
+      if (isAnimating) return;
+      handleAnimateMove(
+        move,
+        () => {
+          setCubeState((prev) => applyMove(prev, move));
+        },
+        240
+      );
+    },
+    [handleAnimateMove, isAnimating]
+  );
 
   const handleApplyAlgorithm = useCallback((alg: string) => {
     playTurnSound();
@@ -92,11 +132,6 @@ export default function Home() {
     });
   }, []);
 
-  const handleStateChangeFromPlayer = useCallback((newState: CubeState, move?: Move | null) => {
-    if (move) setAnimatingMove(move);
-    setCubeState(newState);
-  }, []);
-
   return (
     <div className="min-h-screen flex flex-col bg-[#fafafa] text-neutral-900">
       {/* Header */}
@@ -130,12 +165,13 @@ export default function Home() {
                   activeColor={activeColor}
                   onFaceletClick={handlePaint}
                   animatingMove={animatingMove}
-                  onAnimationComplete={() => setAnimatingMove(null)}
+                  onAnimationComplete={handleAnimationComplete}
+                  hintMove={hintMove}
                 />
-                <MoveControls onApplyMove={handleApplyMove} />
+                <MoveControls onApplyMove={handleManualMove} disabled={isAnimating} />
               </div>
 
-              {/* Right Column: 2D Net Editor & Direct Solver Controls */}
+              {/* Right Column: 2D Net Editor & Optimal Solver Player */}
               <div className="lg:col-span-5 flex flex-col gap-3">
                 <CubeNet2D
                   state={cubeState}
@@ -145,12 +181,14 @@ export default function Home() {
                   onToggleLockCenters={() => setLockCenters(!lockCenters)}
                 />
 
-                {/* Solver Player right below Net Editor */}
+                {/* Solver Player */}
                 <SolutionPlayer
                   currentState={cubeState}
-                  onStateChange={handleStateChangeFromPlayer}
+                  onStateChange={setCubeState}
+                  onAnimateMove={handleAnimateMove}
                   canSolve={validation.canSolve}
                   isSolved={isSolved}
+                  isAnimating={isAnimating}
                 />
 
                 {/* Validation Status */}
@@ -184,7 +222,7 @@ export default function Home() {
 
       {/* Minimal Footer */}
       <footer className="w-full border-t border-neutral-200 py-3.5 px-4 text-center text-[11px] text-neutral-400 font-mono">
-        Rubik's Studio • Kociemba Two-Phase Engine
+        Rubik's Studio • Kociemba Two-Phase Optimal Engine
       </footer>
     </div>
   );

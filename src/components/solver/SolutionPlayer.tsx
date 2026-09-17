@@ -1,10 +1,11 @@
 'use client';
 
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef, useCallback } from 'react';
 import { CubeState, Move } from '@/lib/cube/types';
 import { solveCubeState, SolveResult } from '@/lib/solver/kociemba';
 import { applyMove, invertMove } from '@/lib/cube/state';
-import { playSuccessSound } from '@/lib/audio/soundEffects';
+import { MOVE_DESCRIPTIONS } from '@/lib/cube/constants';
+import { playSuccessSound, playClickSound } from '@/lib/audio/soundEffects';
 import confetti from 'canvas-confetti';
 import {
   Play,
@@ -14,28 +15,53 @@ import {
   RotateCcw,
   Copy,
   Check,
+  Compass,
+  Sparkles,
 } from 'lucide-react';
 
 interface SolutionPlayerProps {
   currentState: CubeState;
-  onStateChange: (state: CubeState, animatingMove?: Move | null) => void;
+  onStateChange: (state: CubeState) => void;
+  onAnimateMove: (move: Move, onComplete?: () => void, duration?: number) => void;
   canSolve: boolean;
   isSolved: boolean;
+  isAnimating: boolean;
 }
 
 export const SolutionPlayer: React.FC<SolutionPlayerProps> = ({
   currentState,
   onStateChange,
+  onAnimateMove,
   canSolve,
   isSolved,
+  isAnimating,
 }) => {
   const [solveResult, setSolveResult] = useState<SolveResult | null>(null);
   const [isSolving, setIsSolving] = useState(false);
   const [currentStepIndex, setCurrentStepIndex] = useState(-1);
   const [isPlaying, setIsPlaying] = useState(false);
-  const [speed, setSpeed] = useState<number>(500);
+  const [speedMultiplier, setSpeedMultiplier] = useState<number>(1);
   const [copied, setCopied] = useState(false);
   const [savedInitialState, setSavedInitialState] = useState<CubeState | null>(null);
+
+  const isPlayingRef = useRef(false);
+  isPlayingRef.current = isPlaying;
+
+  const currentStepIndexRef = useRef(currentStepIndex);
+  currentStepIndexRef.current = currentStepIndex;
+
+  const solveResultRef = useRef(solveResult);
+  solveResultRef.current = solveResult;
+
+  const currentStateRef = useRef(currentState);
+  currentStateRef.current = currentState;
+
+  // Move durations based on speed multiplier
+  const getMoveDuration = useCallback(() => {
+    if (speedMultiplier === 0.5) return 500;
+    if (speedMultiplier === 2) return 180;
+    return 300;
+  }, [speedMultiplier]);
 
   const handleSolve = async () => {
     if (!canSolve || isSolving) return;
@@ -61,40 +87,75 @@ export const SolutionPlayer: React.FC<SolutionPlayerProps> = ({
 
   const triggerConfetti = () => {
     confetti({
-      particleCount: 50,
-      spread: 60,
+      particleCount: 60,
+      spread: 70,
       origin: { y: 0.6 },
     });
   };
 
-  const stepForward = () => {
-    if (!solveResult || currentStepIndex >= solveResult.steps.length - 1) return;
-    const nextIndex = currentStepIndex + 1;
-    const nextStep = solveResult.steps[nextIndex];
+  // Step Forward with True 3D Physical Rotation
+  const stepForward = useCallback(
+    (onDone?: () => void) => {
+      const result = solveResultRef.current;
+      const currIdx = currentStepIndexRef.current;
+      const state = currentStateRef.current;
 
-    const nextState = applyMove(currentState, nextStep.move);
-    onStateChange(nextState, nextStep.move);
-    setCurrentStepIndex(nextIndex);
+      if (!result || currIdx >= result.steps.length - 1) {
+        setIsPlaying(false);
+        return;
+      }
 
-    if (nextIndex === solveResult.steps.length - 1) {
-      setIsPlaying(false);
-      triggerConfetti();
-      playSuccessSound();
-    }
-  };
+      const nextIdx = currIdx + 1;
+      const nextStep = result.steps[nextIdx];
+      const duration = getMoveDuration();
 
-  const stepBackward = () => {
-    if (!solveResult || currentStepIndex < 0) return;
-    const currentStep = solveResult.steps[currentStepIndex];
-    const inverse = invertMove(currentStep.move);
+      onAnimateMove(
+        nextStep.move,
+        () => {
+          const nextState = applyMove(state, nextStep.move);
+          onStateChange(nextState);
+          setCurrentStepIndex(nextIdx);
 
-    const prevState = applyMove(currentState, inverse);
-    onStateChange(prevState, inverse as Move);
-    setCurrentStepIndex(currentStepIndex - 1);
-  };
+          if (nextIdx === result.steps.length - 1) {
+            setIsPlaying(false);
+            triggerConfetti();
+            playSuccessSound();
+          }
 
+          if (onDone) onDone();
+        },
+        duration
+      );
+    },
+    [onAnimateMove, onStateChange, getMoveDuration]
+  );
+
+  // Step Backward with True 3D Physical Inverse Rotation
+  const stepBackward = useCallback(() => {
+    const result = solveResultRef.current;
+    const currIdx = currentStepIndexRef.current;
+    const state = currentStateRef.current;
+
+    if (!result || currIdx < 0) return;
+
+    const currentStep = result.steps[currIdx];
+    const inverse = invertMove(currentStep.move) as Move;
+    const duration = getMoveDuration();
+
+    onAnimateMove(
+      inverse,
+      () => {
+        const prevState = applyMove(state, inverse);
+        onStateChange(prevState);
+        setCurrentStepIndex(currIdx - 1);
+      },
+      duration
+    );
+  }, [onAnimateMove, onStateChange, getMoveDuration]);
+
+  // Jump to Step Directly (instant jump without sequential delay)
   const jumpToStep = (targetIndex: number) => {
-    if (!solveResult || !savedInitialState) return;
+    if (!solveResult || !savedInitialState || isAnimating) return;
     setIsPlaying(false);
 
     let state = savedInitialState;
@@ -110,26 +171,44 @@ export const SolutionPlayer: React.FC<SolutionPlayerProps> = ({
     }
   };
 
+  // Reset to initial scrambled state
   const resetToSolveStart = () => {
-    if (!savedInitialState) return;
+    if (!savedInitialState || isAnimating) return;
     setIsPlaying(false);
     onStateChange(savedInitialState);
     setCurrentStepIndex(-1);
   };
 
+  // Synchronized Auto-Playback Loop
   useEffect(() => {
     if (!isPlaying) return;
 
-    const interval = setInterval(() => {
-      if (solveResult && currentStepIndex < solveResult.steps.length - 1) {
-        stepForward();
-      } else {
-        setIsPlaying(false);
-      }
-    }, speed);
+    let timeoutId: NodeJS.Timeout;
 
-    return () => clearInterval(interval);
-  }, [isPlaying, currentStepIndex, solveResult, speed]);
+    const runNext = () => {
+      if (!isPlayingRef.current) return;
+      const result = solveResultRef.current;
+      const currIdx = currentStepIndexRef.current;
+
+      if (!result || currIdx >= result.steps.length - 1) {
+        setIsPlaying(false);
+        return;
+      }
+
+      stepForward(() => {
+        if (isPlayingRef.current) {
+          const pauseBetweenMoves = speedMultiplier === 0.5 ? 200 : speedMultiplier === 2 ? 80 : 120;
+          timeoutId = setTimeout(runNext, pauseBetweenMoves);
+        }
+      });
+    };
+
+    runNext();
+
+    return () => {
+      clearTimeout(timeoutId);
+    };
+  }, [isPlaying, stepForward, speedMultiplier]);
 
   const copySolution = () => {
     if (!solveResult?.solution) return;
@@ -138,26 +217,35 @@ export const SolutionPlayer: React.FC<SolutionPlayerProps> = ({
     setTimeout(() => setCopied(false), 2000);
   };
 
-  const currentStep = solveResult && currentStepIndex >= 0 ? solveResult.steps[currentStepIndex] : null;
+  const currentStep =
+    solveResult && currentStepIndex >= 0 ? solveResult.steps[currentStepIndex] : null;
+  const nextUpcomingStep =
+    solveResult && currentStepIndex + 1 < solveResult.steps.length
+      ? solveResult.steps[currentStepIndex + 1]
+      : null;
   const totalSteps = solveResult?.steps.length || 0;
-  const progressPercent = totalSteps > 0 ? ((currentStepIndex + 1) / totalSteps) * 100 : 0;
+  const progressPercent =
+    totalSteps > 0 ? ((currentStepIndex + 1) / totalSteps) * 100 : 0;
 
   return (
     <div className="flex flex-col gap-3 p-4 sm:p-5 rounded-xl bg-white border border-neutral-200 shadow-xs">
       {/* Top Header & Solve CTA */}
       <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3">
         <div>
-          <h2 className="text-sm font-semibold text-neutral-900 tracking-tight">
-            Optimal Solver
+          <h2 className="text-sm font-semibold text-neutral-900 tracking-tight flex items-center gap-1.5">
+            <span>Optimal Solver</span>
+            <span className="text-[10px] font-mono px-1.5 py-0.5 rounded bg-neutral-100 text-neutral-600 border border-neutral-200">
+              Two-Phase Kociemba
+            </span>
           </h2>
           <p className="text-xs text-neutral-500 mt-0.5">
-            Two-Phase Kociemba algorithm (typically &lt;22 moves)
+            Step-by-step physical solution (&lt;22 optimal moves)
           </p>
         </div>
 
         <button
           onClick={handleSolve}
-          disabled={!canSolve || isSolving}
+          disabled={!canSolve || isSolving || isAnimating}
           className={`flex items-center justify-center gap-2 px-5 py-2 rounded-lg font-medium text-xs tracking-wide transition-all shadow-xs ${
             !canSolve
               ? 'bg-neutral-100 text-neutral-400 cursor-not-allowed border border-neutral-200'
@@ -169,10 +257,13 @@ export const SolutionPlayer: React.FC<SolutionPlayerProps> = ({
           {isSolving ? (
             <>
               <div className="w-3.5 h-3.5 border-2 border-white/30 border-t-white rounded-full animate-spin" />
-              <span>Solving...</span>
+              <span>Computing Solution...</span>
             </>
           ) : (
-            <span>{isSolved ? 'Re-Solve' : 'Solve Cube'}</span>
+            <>
+              <Sparkles className="w-3.5 h-3.5 text-yellow-400" />
+              <span>{isSolved ? 'Re-Solve' : 'Solve Cube'}</span>
+            </>
           )}
         </button>
       </div>
@@ -182,15 +273,16 @@ export const SolutionPlayer: React.FC<SolutionPlayerProps> = ({
         <div className="flex flex-col gap-3 pt-2.5 border-t border-neutral-100">
           {solveResult.success ? (
             solveResult.steps.length === 0 ? (
-              <div className="p-3 rounded-lg bg-neutral-50 border border-neutral-200 text-neutral-700 text-xs">
-                Cube is already in solved configuration.
+              <div className="p-3.5 rounded-lg bg-emerald-50 border border-emerald-200 text-emerald-800 text-xs font-medium flex items-center gap-2">
+                <Check className="w-4 h-4 text-emerald-600" />
+                <span>The cube is already in a fully solved state!</span>
               </div>
             ) : (
               <>
-                {/* Stats & Actions */}
+                {/* Stats, Orientation Reminder & Action */}
                 <div className="flex flex-wrap items-center justify-between gap-2 text-xs">
                   <div className="flex items-center gap-2">
-                    <span className="font-mono text-neutral-700 bg-neutral-100 px-2 py-0.5 rounded border border-neutral-200">
+                    <span className="font-mono text-neutral-800 bg-neutral-100 px-2.5 py-0.5 rounded border border-neutral-200 font-semibold">
                       {solveResult.moveCount} moves
                     </span>
                     <span className="font-mono text-neutral-500 bg-neutral-50 px-2 py-0.5 rounded border border-neutral-200">
@@ -216,6 +308,18 @@ export const SolutionPlayer: React.FC<SolutionPlayerProps> = ({
                   </button>
                 </div>
 
+                {/* Physical Orientation Guide */}
+                <div className="flex items-center gap-2 p-2.5 rounded-lg bg-blue-50/70 border border-blue-200/80 text-blue-900 text-xs">
+                  <Compass className="w-4 h-4 text-blue-600 shrink-0" />
+                  <div className="flex-1">
+                    <span className="font-semibold text-blue-950">Holding Position: </span>
+                    <span className="text-blue-800">
+                      Hold <span className="font-medium text-blue-950 underline decoration-blue-300">White face UP</span>,{' '}
+                      <span className="font-medium text-blue-950 underline decoration-blue-300">Green face FRONT</span>.
+                    </span>
+                  </div>
+                </div>
+
                 {/* Progress Bar */}
                 <div className="w-full bg-neutral-100 h-1.5 rounded-full overflow-hidden border border-neutral-200">
                   <div
@@ -224,23 +328,38 @@ export const SolutionPlayer: React.FC<SolutionPlayerProps> = ({
                   />
                 </div>
 
-                {/* Active Step Highlight */}
-                <div className="flex items-center justify-between p-3 rounded-lg bg-neutral-50 border border-neutral-200">
-                  <div className="flex items-center gap-3">
-                    <div className="flex items-center justify-center w-10 h-10 rounded-lg bg-white border border-neutral-300 font-mono font-bold text-lg text-neutral-900 shadow-xs">
-                      {currentStep ? currentStep.move : '—'}
+                {/* Active Step Card */}
+                <div className="flex items-center justify-between p-3.5 rounded-lg bg-neutral-50 border border-neutral-200">
+                  <div className="flex items-center gap-3.5">
+                    {/* Big Move Badge */}
+                    <div className="flex flex-col items-center justify-center w-12 h-12 rounded-xl bg-white border border-neutral-300 shadow-xs">
+                      <span className="font-mono font-bold text-xl text-neutral-900 leading-none">
+                        {currentStep ? currentStep.move : nextUpcomingStep?.move || '—'}
+                      </span>
                     </div>
+
                     <div>
                       <div className="text-[11px] font-mono text-neutral-400">
-                        {currentStep ? `Step ${currentStepIndex + 1} of ${totalSteps}` : 'Initial state'}
+                        {currentStep
+                          ? `Step ${currentStepIndex + 1} of ${totalSteps}`
+                          : `Step 1 of ${totalSteps} (Ready to start)`}
                       </div>
-                      <div className="text-xs font-medium text-neutral-800 mt-0.5">
-                        {currentStep ? currentStep.text : 'Ready to start'}
+                      <div className="text-xs font-semibold text-neutral-900 mt-0.5">
+                        {currentStep
+                          ? currentStep.text
+                          : nextUpcomingStep
+                          ? `Next: ${nextUpcomingStep.text}`
+                          : 'Ready to solve'}
                       </div>
+                      {MOVE_DESCRIPTIONS[currentStep?.move || nextUpcomingStep?.move || ''] && (
+                        <div className="text-[11px] text-neutral-500 mt-0.5">
+                          {MOVE_DESCRIPTIONS[currentStep?.move || nextUpcomingStep?.move || '']}
+                        </div>
+                      )}
                     </div>
                   </div>
 
-                  <div className="text-xs text-neutral-400 font-mono">
+                  <div className="text-xs text-neutral-500 font-mono font-medium">
                     {Math.round(progressPercent)}%
                   </div>
                 </div>
@@ -248,7 +367,8 @@ export const SolutionPlayer: React.FC<SolutionPlayerProps> = ({
                 {/* Timeline Move Chips */}
                 <div className="flex items-center gap-1 overflow-x-auto pb-1.5 scrollbar-thin">
                   <button
-                    onClick={() => resetToSolveStart()}
+                    onClick={resetToSolveStart}
+                    disabled={isAnimating}
                     className={`px-2.5 py-1 text-xs font-mono font-medium rounded shrink-0 border transition ${
                       currentStepIndex === -1
                         ? 'bg-neutral-900 text-white border-neutral-900 shadow-xs'
@@ -266,6 +386,7 @@ export const SolutionPlayer: React.FC<SolutionPlayerProps> = ({
                       <button
                         key={idx}
                         onClick={() => jumpToStep(idx)}
+                        disabled={isAnimating}
                         className={`px-2.5 py-1 text-xs font-mono font-medium rounded shrink-0 border transition ${
                           isActive
                             ? 'bg-neutral-900 text-white border-neutral-900 shadow-xs font-bold'
@@ -285,60 +406,60 @@ export const SolutionPlayer: React.FC<SolutionPlayerProps> = ({
                   <div className="flex items-center gap-1.5">
                     <button
                       onClick={resetToSolveStart}
-                      disabled={currentStepIndex === -1}
-                      className="p-1.5 rounded-lg bg-white hover:bg-neutral-50 text-neutral-700 disabled:opacity-30 disabled:pointer-events-none transition border border-neutral-200 shadow-2xs"
+                      disabled={currentStepIndex === -1 || isAnimating}
+                      className="p-2 rounded-lg bg-white hover:bg-neutral-50 text-neutral-700 disabled:opacity-30 disabled:pointer-events-none transition border border-neutral-200 shadow-2xs"
                       title="Reset to start"
                     >
-                      <RotateCcw className="w-3.5 h-3.5" />
+                      <RotateCcw className="w-4 h-4" />
                     </button>
                     <button
                       onClick={stepBackward}
-                      disabled={currentStepIndex === -1}
-                      className="p-1.5 rounded-lg bg-white hover:bg-neutral-50 text-neutral-700 disabled:opacity-30 disabled:pointer-events-none transition border border-neutral-200 shadow-2xs"
-                      title="Step Backward"
+                      disabled={currentStepIndex === -1 || isAnimating}
+                      className="p-2 rounded-lg bg-white hover:bg-neutral-50 text-neutral-700 disabled:opacity-30 disabled:pointer-events-none transition border border-neutral-200 shadow-2xs"
+                      title="Step Backward (Previous move)"
                     >
-                      <SkipBack className="w-3.5 h-3.5" />
+                      <SkipBack className="w-4 h-4" />
                     </button>
                     <button
                       onClick={() => setIsPlaying(!isPlaying)}
                       disabled={currentStepIndex >= totalSteps - 1}
-                      className="flex items-center gap-1 px-3 py-1.5 rounded-lg bg-neutral-900 hover:bg-neutral-800 text-white font-semibold text-xs disabled:opacity-30 disabled:pointer-events-none transition active:scale-95 shadow-xs"
+                      className="flex items-center gap-1.5 px-4 py-2 rounded-lg bg-neutral-900 hover:bg-neutral-800 text-white font-semibold text-xs disabled:opacity-30 disabled:pointer-events-none transition active:scale-95 shadow-xs"
                     >
                       {isPlaying ? (
                         <>
-                          <Pause className="w-3.5 h-3.5" />
+                          <Pause className="w-4 h-4" />
                           <span>Pause</span>
                         </>
                       ) : (
                         <>
-                          <Play className="w-3.5 h-3.5" />
-                          <span>Play</span>
+                          <Play className="w-4 h-4" />
+                          <span>Auto Play</span>
                         </>
                       )}
                     </button>
                     <button
-                      onClick={stepForward}
-                      disabled={currentStepIndex >= totalSteps - 1}
-                      className="p-1.5 rounded-lg bg-white hover:bg-neutral-50 text-neutral-700 disabled:opacity-30 disabled:pointer-events-none transition border border-neutral-200 shadow-2xs"
-                      title="Step Forward"
+                      onClick={() => stepForward()}
+                      disabled={currentStepIndex >= totalSteps - 1 || isAnimating}
+                      className="p-2 rounded-lg bg-white hover:bg-neutral-50 text-neutral-700 disabled:opacity-30 disabled:pointer-events-none transition border border-neutral-200 shadow-2xs"
+                      title="Step Forward (Next move)"
                     >
-                      <SkipForward className="w-3.5 h-3.5" />
+                      <SkipForward className="w-4 h-4" />
                     </button>
                   </div>
 
                   {/* Speed Selector */}
                   <div className="flex items-center gap-1 bg-neutral-50 px-2 py-1 rounded-md border border-neutral-200">
-                    <span className="text-[11px] text-neutral-400 mr-1">Speed:</span>
+                    <span className="text-[11px] text-neutral-400 mr-1 font-mono">Speed:</span>
                     {[
-                      { label: '0.5x', ms: 900 },
-                      { label: '1x', ms: 500 },
-                      { label: '2x', ms: 250 },
+                      { label: '0.5x Slow', mult: 0.5 },
+                      { label: '1x', mult: 1 },
+                      { label: '2x Fast', mult: 2 },
                     ].map((s) => (
                       <button
                         key={s.label}
-                        onClick={() => setSpeed(s.ms)}
-                        className={`px-1.5 py-0.5 text-[10px] font-mono rounded font-medium transition ${
-                          speed === s.ms
+                        onClick={() => setSpeedMultiplier(s.mult)}
+                        className={`px-2 py-0.5 text-[11px] font-mono rounded font-medium transition ${
+                          speedMultiplier === s.mult
                             ? 'bg-neutral-900 text-white shadow-2xs'
                             : 'text-neutral-500 hover:text-neutral-800'
                         }`}
@@ -351,8 +472,8 @@ export const SolutionPlayer: React.FC<SolutionPlayerProps> = ({
               </>
             )
           ) : (
-            <div className="p-3 rounded-lg bg-neutral-50 border border-neutral-200 text-neutral-700 text-xs">
-              {solveResult.error}
+            <div className="p-3.5 rounded-lg bg-red-50 border border-red-200 text-red-700 text-xs">
+              {solveResult.error || 'Failed to solve cube state. Please check cube validity.'}
             </div>
           )}
         </div>
