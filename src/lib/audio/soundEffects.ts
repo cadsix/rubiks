@@ -64,6 +64,48 @@ export function playClickSound() {
   }
 }
 
+// Realistic physical corner twist sound (spring tension + tactile snap)
+export function playCornerTwistSound() {
+  if (!soundEnabled) return;
+  try {
+    const ctx = getAudioContext();
+    if (!ctx) return;
+
+    // Phase 1: Spring stretch creak
+    const osc1 = ctx.createOscillator();
+    const gain1 = ctx.createGain();
+    osc1.type = 'sawtooth';
+    osc1.frequency.setValueAtTime(150, ctx.currentTime);
+    osc1.frequency.linearRampToValueAtTime(260, ctx.currentTime + 0.18);
+    gain1.gain.setValueAtTime(0.07, ctx.currentTime);
+    gain1.gain.exponentialRampToValueAtTime(0.001, ctx.currentTime + 0.22);
+    osc1.connect(gain1);
+    gain1.connect(ctx.destination);
+    osc1.start();
+    osc1.stop(ctx.currentTime + 0.24);
+
+    // Phase 2: Solid tactile plastic snap click at the end of twist
+    const osc2 = ctx.createOscillator();
+    const gain2 = ctx.createGain();
+    const filter2 = ctx.createBiquadFilter();
+    osc2.type = 'triangle';
+    osc2.frequency.setValueAtTime(560, ctx.currentTime + 0.45);
+    osc2.frequency.exponentialRampToValueAtTime(120, ctx.currentTime + 0.52);
+    filter2.type = 'lowpass';
+    filter2.frequency.setValueAtTime(2400, ctx.currentTime + 0.45);
+    gain2.gain.setValueAtTime(0, ctx.currentTime);
+    gain2.gain.setValueAtTime(0.3, ctx.currentTime + 0.45);
+    gain2.gain.exponentialRampToValueAtTime(0.001, ctx.currentTime + 0.54);
+    osc2.connect(filter2);
+    filter2.connect(gain2);
+    gain2.connect(ctx.destination);
+    osc2.start(ctx.currentTime + 0.44);
+    osc2.stop(ctx.currentTime + 0.56);
+  } catch (e) {
+    // Ignore audio errors
+  }
+}
+
 // Mechanical slice turn sound (subtle swoosh)
 export function playTurnSound() {
   if (!soundEnabled) return;

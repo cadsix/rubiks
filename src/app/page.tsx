@@ -1,6 +1,6 @@
 'use client';
 
-import React, { useState, useMemo, useCallback, useRef } from 'react';
+import React, { useState, useEffect, useMemo, useCallback, useRef } from 'react';
 import dynamic from 'next/dynamic';
 import { CubeColor, CubeState, Face, Move, PresetPattern } from '@/lib/cube/types';
 import {
@@ -23,9 +23,11 @@ import { SolutionPlayer } from '@/components/solver/SolutionPlayer';
 import { ValidationCard } from '@/components/solver/ValidationCard';
 import { CFOPGuideModal } from '@/components/solver/CFOPGuideModal';
 import { CameraScannerModal } from '@/components/scanner/CameraScannerModal';
+import { SavedHistoryModal } from '@/components/history/SavedHistoryModal';
 import { SpeedTimer } from '@/components/timer/SpeedTimer';
 import { playClickSound, playTurnSound } from '@/lib/audio/soundEffects';
-import { AnimatingMovePayload } from '@/components/cube/Cube3D';
+import { AnimatingMovePayload, AnimatingCornerTwistPayload } from '@/components/cube/Cube3D';
+import { loadCurrentState, saveCurrentState } from '@/lib/storage/cubeStorage';
 
 const Cube3D = dynamic(() => import('@/components/cube/Cube3D').then((mod) => mod.Cube3D), {
   ssr: false,
@@ -44,15 +46,51 @@ export default function Home() {
   const [activeTab, setActiveTab] = useState<'studio' | 'timer'>('studio');
   const [isCFOPGuideOpen, setIsCFOPGuideOpen] = useState(false);
   const [isScannerOpen, setIsScannerOpen] = useState(false);
+  const [isHistoryOpen, setIsHistoryOpen] = useState(false);
+  const isInitialMountRef = useRef(true);
+
+  // Restore saved state from local storage on initial mount
+  useEffect(() => {
+    const saved = loadCurrentState();
+    if (saved) {
+      setCubeState(saved);
+    }
+  }, []);
+
+  // Auto-persist state changes to local storage
+  useEffect(() => {
+    if (isInitialMountRef.current) {
+      isInitialMountRef.current = false;
+      return;
+    }
+    saveCurrentState(cubeState);
+  }, [cubeState]);
 
   // Animation orchestration state
   const [animatingMove, setAnimatingMove] = useState<AnimatingMovePayload | null>(null);
+  const [animatingCornerTwist, setAnimatingCornerTwist] = useState<AnimatingCornerTwistPayload | null>(null);
   const [isAnimating, setIsAnimating] = useState(false);
   const [hintMove, setHintMove] = useState<Move | null>(null);
+  const [focusCornerIndex, setFocusCornerIndex] = useState<number | null>(null);
+  const [solveTriggerCount, setSolveTriggerCount] = useState(0);
   const onAnimationCompleteCallbackRef = useRef<(() => void) | null>(null);
 
   const validation = useMemo(() => validateCubeState(cubeState), [cubeState]);
   const isSolved = useMemo(() => isCubeSolved(cubeState), [cubeState]);
+
+  const highlightCornerIndex = useMemo(() => {
+    if (validation.parityDiagnosis?.hasCornerTwistParity && validation.parityDiagnosis.primaryTwistedCorner) {
+      return validation.parityDiagnosis.primaryTwistedCorner.cornerIndex;
+    }
+    return null;
+  }, [validation]);
+
+  const primaryTwistedCorner = useMemo(() => {
+    if (validation.parityDiagnosis?.hasCornerTwistParity && validation.parityDiagnosis.primaryTwistedCorner) {
+      return validation.parityDiagnosis.primaryTwistedCorner;
+    }
+    return null;
+  }, [validation]);
 
   const highlightFacelets = useMemo(() => {
     const list: Array<{ face: Face; index: number }> = [];
@@ -95,6 +133,7 @@ export default function Home() {
   const handleAnimationComplete = useCallback(() => {
     setIsAnimating(false);
     setAnimatingMove(null);
+    setAnimatingCornerTwist(null);
     if (onAnimationCompleteCallbackRef.current) {
       const cb = onAnimationCompleteCallbackRef.current;
       onAnimationCompleteCallbackRef.current = null;
@@ -156,9 +195,24 @@ export default function Home() {
     });
   }, []);
 
+  // Smooth camera focus to corner
+  const handleFocusCorner = useCallback((cornerIndex: number) => {
+    setFocusCornerIndex(cornerIndex);
+  }, []);
+
+  // True physical corner twist handler with 3D animation
   const handleFixCornerTwist = useCallback((cornerIndex: number, direction: 'CW' | 'CCW') => {
-    playTurnSound();
-    setCubeState((prev) => fixCornerTwist(prev, cornerIndex, direction));
+    setIsAnimating(true);
+    setFocusCornerIndex(cornerIndex);
+    onAnimationCompleteCallbackRef.current = () => {
+      setCubeState((prev) => fixCornerTwist(prev, cornerIndex, direction));
+    };
+    setAnimatingCornerTwist({
+      cornerIndex,
+      direction,
+      id: Date.now() + Math.random(),
+      duration: 640,
+    });
   }, []);
 
   const handleFixEdgeFlip = useCallback((edgeIndex: number) => {
@@ -174,13 +228,14 @@ export default function Home() {
         onTabChange={setActiveTab}
         onOpenCFOP={() => setIsCFOPGuideOpen(true)}
         onOpenScanner={() => setIsScannerOpen(true)}
+        onOpenHistory={() => setIsHistoryOpen(true)}
       />
 
       {/* Main Container */}
-      <main className="flex-1 max-w-7xl w-full mx-auto px-4 sm:px-6 py-4 sm:py-6 flex flex-col gap-4">
+      <main className="flex-1 max-w-7xl w-full mx-auto px-4 sm:px-6 py-3 sm:py-5 flex flex-col gap-3.5">
         {activeTab === 'studio' ? (
           <>
-            {/* Color Palette Bar */}
+            {/* Color Palette & Top Action Bar */}
             <PaletteBar
               activeColor={activeColor}
               onSelectColor={setActiveColor}
@@ -188,10 +243,13 @@ export default function Home() {
               onReset={handleReset}
               onClear={handleClear}
               onScramble={handleRandomScramble}
+              onSolve={() => setSolveTriggerCount((c) => c + 1)}
+              canSolve={validation.canSolve}
+              isSolved={isSolved}
             />
 
-            {/* Two-Column Ergonomic Layout */}
-            <div className="grid grid-cols-1 lg:grid-cols-12 gap-4 items-start">
+            {/* Two-Column Ergonomic Layout (Side-by-Side 3D Cube & Step-by-Step Solver) */}
+            <div className="grid grid-cols-1 lg:grid-cols-12 gap-3.5 items-start">
               {/* Left Column: 3D Viewport & Manual Moves */}
               <div className="lg:col-span-7 flex flex-col gap-3">
                 <Cube3D
@@ -199,24 +257,20 @@ export default function Home() {
                   activeColor={activeColor}
                   onFaceletClick={handlePaint}
                   animatingMove={animatingMove}
+                  animatingCornerTwist={animatingCornerTwist}
                   onAnimationComplete={handleAnimationComplete}
                   hintMove={hintMove}
+                  highlightCornerIndex={highlightCornerIndex}
+                  focusCornerIndex={focusCornerIndex}
+                  twistedCornerInfo={primaryTwistedCorner}
+                  onQuickFixCorner={handleFixCornerTwist}
                 />
                 <MoveControls onApplyMove={handleManualMove} disabled={isAnimating} />
               </div>
 
-              {/* Right Column: 2D Net Editor & Optimal Solver Player */}
+              {/* Right Column: Step-by-Step Solver at Top, Validation & 2D Net beneath */}
               <div className="lg:col-span-5 flex flex-col gap-3">
-                <CubeNet2D
-                  state={cubeState}
-                  activeColor={activeColor}
-                  onPaint={handlePaint}
-                  lockCenters={lockCenters}
-                  onToggleLockCenters={() => setLockCenters(!lockCenters)}
-                  highlightFacelets={highlightFacelets}
-                />
-
-                {/* Solver Player */}
+                {/* 1. Primary Step-by-Step Solver Player (Eye-level with 3D Cube) */}
                 <SolutionPlayer
                   currentState={cubeState}
                   onStateChange={setCubeState}
@@ -224,14 +278,27 @@ export default function Home() {
                   canSolve={validation.canSolve}
                   isSolved={isSolved}
                   isAnimating={isAnimating}
+                  onHintMoveChange={setHintMove}
+                  autoSolveTrigger={solveTriggerCount}
                 />
 
-                {/* Validation Status & Parity Fix */}
+                {/* 2. Validation Status & Parity Fix */}
                 <ValidationCard
                   validation={validation}
                   isSolved={isSolved}
                   onFixCornerTwist={handleFixCornerTwist}
+                  onFocusCorner={handleFocusCorner}
                   onFixEdgeFlip={handleFixEdgeFlip}
+                />
+
+                {/* 3. 2D Net Editor */}
+                <CubeNet2D
+                  state={cubeState}
+                  activeColor={activeColor}
+                  onPaint={handlePaint}
+                  lockCenters={lockCenters}
+                  onToggleLockCenters={() => setLockCenters(!lockCenters)}
+                  highlightFacelets={highlightFacelets}
                 />
               </div>
             </div>
@@ -255,6 +322,13 @@ export default function Home() {
         isOpen={isScannerOpen}
         onClose={() => setIsScannerOpen(false)}
         onApplyScannedState={(scanned) => setCubeState(scanned)}
+      />
+
+      <SavedHistoryModal
+        isOpen={isHistoryOpen}
+        onClose={() => setIsHistoryOpen(false)}
+        currentState={cubeState}
+        onLoadState={(saved) => setCubeState(saved)}
       />
 
       {/* Minimal Footer */}

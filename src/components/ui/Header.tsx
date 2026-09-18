@@ -1,7 +1,7 @@
 'use client';
 
 import React, { useState, useEffect } from 'react';
-import { Box, Volume2, VolumeX, BookOpen, Timer, Camera } from 'lucide-react';
+import { Box, Volume2, VolumeX, BookOpen, Timer, Camera, History } from 'lucide-react';
 import { isSoundEnabled, setSoundEnabled, playClickSound } from '@/lib/audio/soundEffects';
 
 interface HeaderProps {
@@ -9,6 +9,7 @@ interface HeaderProps {
   onTabChange: (tab: 'studio' | 'timer') => void;
   onOpenCFOP: () => void;
   onOpenScanner: () => void;
+  onOpenHistory?: () => void;
 }
 
 export const Header: React.FC<HeaderProps> = ({
@@ -16,6 +17,7 @@ export const Header: React.FC<HeaderProps> = ({
   onTabChange,
   onOpenCFOP,
   onOpenScanner,
+  onOpenHistory,
 }) => {
   const [soundOn, setSoundOn] = useState(true);
 
@@ -77,6 +79,20 @@ export const Header: React.FC<HeaderProps> = ({
 
         {/* Right Action Tools */}
         <div className="flex items-center gap-1.5">
+          {onOpenHistory && (
+            <button
+              onClick={() => {
+                playClickSound();
+                onOpenHistory();
+              }}
+              className="flex items-center gap-1.5 px-2.5 py-1 rounded-md bg-white hover:bg-neutral-50 text-neutral-700 hover:text-neutral-900 border border-neutral-200 text-xs font-medium transition shadow-xs"
+              title="View saved cubes & history"
+            >
+              <History className="w-3.5 h-3.5 text-neutral-500" />
+              <span className="hidden sm:inline">Saved Cubes</span>
+            </button>
+          )}
+
           <button
             onClick={() => {
               playClickSound();

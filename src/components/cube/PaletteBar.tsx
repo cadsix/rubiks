@@ -4,7 +4,7 @@ import React, { useEffect } from 'react';
 import { CubeColor } from '@/lib/cube/types';
 import { COLOR_HEX, COLOR_NAMES, ALL_COLORS } from '@/lib/cube/constants';
 import { playClickSound } from '@/lib/audio/soundEffects';
-import { RotateCcw, Trash2, Shuffle } from 'lucide-react';
+import { RotateCcw, Trash2, Shuffle, Sparkles } from 'lucide-react';
 
 interface PaletteBarProps {
   activeColor: CubeColor;
@@ -13,6 +13,9 @@ interface PaletteBarProps {
   onReset: () => void;
   onClear: () => void;
   onScramble: () => void;
+  onSolve?: () => void;
+  canSolve?: boolean;
+  isSolved?: boolean;
 }
 
 const SHORTCUT_KEYS: Record<string, CubeColor> = {
@@ -31,6 +34,9 @@ export const PaletteBar: React.FC<PaletteBarProps> = ({
   onReset,
   onClear,
   onScramble,
+  onSolve,
+  canSolve,
+  isSolved,
 }) => {
   useEffect(() => {
     const handleKeyDown = (e: KeyboardEvent) => {
@@ -91,16 +97,35 @@ export const PaletteBar: React.FC<PaletteBarProps> = ({
       </div>
 
       {/* Action Buttons */}
-      <div className="flex items-center gap-1.5 self-center sm:self-auto">
+      <div className="flex flex-wrap items-center gap-1.5 self-center sm:self-auto">
+        {onSolve && (
+          <button
+            onClick={() => {
+              playClickSound();
+              onSolve();
+            }}
+            disabled={!canSolve}
+            className={`flex items-center gap-1.5 px-3.5 py-1.5 rounded-lg text-xs font-semibold transition active:scale-95 shadow-xs ${
+              !canSolve
+                ? 'bg-neutral-100 text-neutral-400 cursor-not-allowed border border-neutral-200'
+                : 'bg-neutral-900 hover:bg-neutral-800 text-white'
+            }`}
+            title="Solve cube using optimal solver"
+          >
+            <Sparkles className="w-3.5 h-3.5 text-yellow-300" />
+            <span>{isSolved ? 'Re-Solve' : 'Solve Cube'}</span>
+          </button>
+        )}
+
         <button
           onClick={() => {
             playClickSound();
             onScramble();
           }}
-          className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-medium bg-neutral-900 hover:bg-neutral-800 text-white transition active:scale-95 shadow-xs"
+          className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-medium bg-white hover:bg-neutral-50 text-neutral-800 border border-neutral-200 transition active:scale-95 shadow-xs"
           title="Random scramble"
         >
-          <Shuffle className="w-3.5 h-3.5 text-neutral-300" />
+          <Shuffle className="w-3.5 h-3.5 text-neutral-500" />
           <span>Scramble</span>
         </button>
 
