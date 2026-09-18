@@ -3,7 +3,15 @@
 import React, { useState, useMemo, useCallback, useRef } from 'react';
 import dynamic from 'next/dynamic';
 import { CubeColor, CubeState, Face, Move, PresetPattern } from '@/lib/cube/types';
-import { getSolvedCubeState, cloneCubeState, applyMove, applyMoves, isCubeSolved } from '@/lib/cube/state';
+import {
+  getSolvedCubeState,
+  cloneCubeState,
+  applyMove,
+  applyMoves,
+  isCubeSolved,
+  fixCornerTwist,
+  fixEdgeFlip,
+} from '@/lib/cube/state';
 import { validateCubeState } from '@/lib/cube/validator';
 import { generateRandomScramble } from '@/lib/cube/presets';
 import { Header } from '@/components/ui/Header';
@@ -45,6 +53,22 @@ export default function Home() {
 
   const validation = useMemo(() => validateCubeState(cubeState), [cubeState]);
   const isSolved = useMemo(() => isCubeSolved(cubeState), [cubeState]);
+
+  const highlightFacelets = useMemo(() => {
+    const list: Array<{ face: Face; index: number }> = [];
+    if (validation.parityDiagnosis?.hasCornerTwistParity && validation.parityDiagnosis.primaryTwistedCorner) {
+      const tc = validation.parityDiagnosis.primaryTwistedCorner;
+      list.push({ face: tc.faces[0], index: tc.faces[1] });
+      list.push({ face: tc.faces[2], index: tc.faces[3] });
+      list.push({ face: tc.faces[4], index: tc.faces[5] });
+    }
+    if (validation.parityDiagnosis?.hasEdgeFlipParity && validation.parityDiagnosis.primaryFlippedEdge) {
+      const fe = validation.parityDiagnosis.primaryFlippedEdge;
+      list.push({ face: fe.faces[0], index: fe.faces[1] });
+      list.push({ face: fe.faces[2], index: fe.faces[3] });
+    }
+    return list;
+  }, [validation]);
 
   const handlePaint = useCallback((face: Face, index: number) => {
     setCubeState((prev) => {
@@ -132,6 +156,16 @@ export default function Home() {
     });
   }, []);
 
+  const handleFixCornerTwist = useCallback((cornerIndex: number, direction: 'CW' | 'CCW') => {
+    playTurnSound();
+    setCubeState((prev) => fixCornerTwist(prev, cornerIndex, direction));
+  }, []);
+
+  const handleFixEdgeFlip = useCallback((edgeIndex: number) => {
+    playTurnSound();
+    setCubeState((prev) => fixEdgeFlip(prev, edgeIndex));
+  }, []);
+
   return (
     <div className="min-h-screen flex flex-col bg-[#fafafa] text-neutral-900">
       {/* Header */}
@@ -179,6 +213,7 @@ export default function Home() {
                   onPaint={handlePaint}
                   lockCenters={lockCenters}
                   onToggleLockCenters={() => setLockCenters(!lockCenters)}
+                  highlightFacelets={highlightFacelets}
                 />
 
                 {/* Solver Player */}
@@ -191,10 +226,12 @@ export default function Home() {
                   isAnimating={isAnimating}
                 />
 
-                {/* Validation Status */}
+                {/* Validation Status & Parity Fix */}
                 <ValidationCard
                   validation={validation}
                   isSolved={isSolved}
+                  onFixCornerTwist={handleFixCornerTwist}
+                  onFixEdgeFlip={handleFixEdgeFlip}
                 />
               </div>
             </div>

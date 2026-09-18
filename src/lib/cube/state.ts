@@ -275,3 +275,64 @@ export function isCubeSolved(state: CubeState): boolean {
   }
   return true;
 }
+
+const CORNER_SLOTS: [Face, number, Face, number, Face, number][] = [
+  ['U', 8, 'R', 0, 'F', 2], // URF (0)
+  ['U', 6, 'F', 0, 'L', 2], // UFL (1)
+  ['U', 0, 'L', 0, 'B', 2], // ULB (2)
+  ['U', 2, 'B', 0, 'R', 2], // UBR (3)
+  ['D', 2, 'F', 8, 'R', 6], // DFR (4)
+  ['D', 0, 'L', 8, 'F', 6], // DLF (5)
+  ['D', 6, 'B', 8, 'L', 6], // DBL (6)
+  ['D', 8, 'R', 8, 'B', 6], // DRB (7)
+];
+
+const EDGE_SLOTS: [Face, number, Face, number][] = [
+  ['U', 5, 'R', 1], // UR (0)
+  ['U', 7, 'F', 1], // UF (1)
+  ['U', 3, 'L', 1], // UL (2)
+  ['U', 1, 'B', 1], // UB (3)
+  ['D', 5, 'R', 7], // DR (4)
+  ['D', 1, 'F', 7], // DF (5)
+  ['D', 3, 'L', 7], // DL (6)
+  ['D', 7, 'B', 7], // DB (7)
+  ['F', 5, 'R', 3], // FR (8)
+  ['F', 3, 'L', 5], // FL (9)
+  ['B', 5, 'L', 3], // BL (10)
+  ['B', 3, 'R', 5], // BR (11)
+];
+
+export function fixCornerTwist(state: CubeState, cornerIndex: number, direction: 'CW' | 'CCW'): CubeState {
+  if (cornerIndex < 0 || cornerIndex >= CORNER_SLOTS.length) return state;
+  const next = cloneCubeState(state);
+  const [f1, i1, f2, i2, f3, i3] = CORNER_SLOTS[cornerIndex];
+  const c1 = next[f1][i1];
+  const c2 = next[f2][i2];
+  const c3 = next[f3][i3];
+
+  if (direction === 'CW') {
+    next[f1][i1] = c3;
+    next[f2][i2] = c1;
+    next[f3][i3] = c2;
+  } else {
+    next[f1][i1] = c2;
+    next[f2][i2] = c3;
+    next[f3][i3] = c1;
+  }
+
+  return next;
+}
+
+export function fixEdgeFlip(state: CubeState, edgeIndex: number): CubeState {
+  if (edgeIndex < 0 || edgeIndex >= EDGE_SLOTS.length) return state;
+  const next = cloneCubeState(state);
+  const [f1, i1, f2, i2] = EDGE_SLOTS[edgeIndex];
+  const c1 = next[f1][i1];
+  const c2 = next[f2][i2];
+
+  next[f1][i1] = c2;
+  next[f2][i2] = c1;
+
+  return next;
+}
+

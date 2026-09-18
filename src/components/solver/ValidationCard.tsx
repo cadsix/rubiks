@@ -1,51 +1,149 @@
 'use client';
 
 import React from 'react';
-import { ValidationResult } from '@/lib/cube/types';
-import { AlertCircle, Check } from 'lucide-react';
+import { ValidationResult, TwistedCornerInfo, FlippedEdgeInfo } from '@/lib/cube/types';
+import { AlertCircle, Check, Wrench, RotateCw, RefreshCcw, Sparkles } from 'lucide-react';
 
 interface ValidationCardProps {
   validation: ValidationResult;
   isSolved: boolean;
+  onFixCornerTwist?: (cornerIndex: number, direction: 'CW' | 'CCW') => void;
+  onFixEdgeFlip?: (edgeIndex: number) => void;
 }
 
 export const ValidationCard: React.FC<ValidationCardProps> = ({
   validation,
   isSolved,
+  onFixCornerTwist,
+  onFixEdgeFlip,
 }) => {
-  const { valid, errors } = validation;
+  const { valid, errors, parityDiagnosis } = validation;
+
+  const hasTwistParity = parityDiagnosis?.hasCornerTwistParity;
+  const primaryTwistedCorner = parityDiagnosis?.primaryTwistedCorner;
+
+  const hasEdgeParity = parityDiagnosis?.hasEdgeFlipParity;
+  const primaryFlippedEdge = parityDiagnosis?.primaryFlippedEdge;
 
   return (
-    <div className="flex flex-col gap-2 p-3 sm:p-3.5 rounded-xl bg-white border border-neutral-200 shadow-xs">
+    <div className="flex flex-col gap-2.5 p-3.5 sm:p-4 rounded-xl bg-white border border-neutral-200 shadow-xs">
       <div className="flex items-center justify-between">
-        <span className="text-xs font-semibold text-neutral-800">
-          Cube State Validation
+        <span className="text-xs font-semibold text-neutral-800 flex items-center gap-1.5">
+          <Wrench className="w-3.5 h-3.5 text-neutral-500" />
+          <span>Cube State & Parity</span>
         </span>
 
         <span
-          className={`text-[11px] font-mono px-2 py-0.5 rounded border ${
+          className={`text-[11px] font-mono px-2 py-0.5 rounded border font-medium ${
             isSolved
-              ? 'bg-neutral-100 text-neutral-700 border-neutral-200'
+              ? 'bg-neutral-100 text-neutral-800 border-neutral-200'
               : valid
-              ? 'bg-neutral-100 text-neutral-700 border-neutral-200'
-              : 'bg-neutral-50 text-neutral-600 border-neutral-200'
+              ? 'bg-neutral-100 text-neutral-800 border-neutral-200'
+              : 'bg-amber-50 text-amber-800 border-amber-200'
           }`}
         >
-          {isSolved ? 'Solved' : valid ? 'Solvable' : `${errors.length} issues`}
+          {isSolved ? 'Solved' : valid ? 'Solvable' : `${errors.length} issue${errors.length > 1 ? 's' : ''}`}
         </span>
       </div>
 
       {!valid ? (
-        <div className="flex flex-col gap-1.5 mt-0.5">
-          {errors.map((err, i) => (
-            <div
-              key={i}
-              className="flex items-start gap-2 p-2 rounded-md bg-neutral-50 border border-neutral-200 text-neutral-700 text-xs leading-snug"
-            >
-              <AlertCircle className="w-3.5 h-3.5 text-neutral-500 shrink-0 mt-0.5" />
-              <span>{err}</span>
+        <div className="flex flex-col gap-2 mt-0.5">
+          {/* Specific Corner Twist Diagnostic & Auto-Fix Card */}
+          {hasTwistParity && primaryTwistedCorner && (
+            <div className="flex flex-col gap-2 p-3 rounded-lg bg-amber-50/70 border border-amber-200 text-amber-950 text-xs">
+              <div className="flex items-start justify-between gap-2">
+                <div className="flex items-center gap-1.5 font-semibold text-amber-900">
+                  <RotateCw className="w-4 h-4 text-amber-700 shrink-0" />
+                  <span>Twisted Corner Pinpointed:</span>
+                </div>
+                <span className="text-[10px] font-mono px-1.5 py-0.5 rounded bg-amber-100/80 text-amber-800 border border-amber-200">
+                  {primaryTwistedCorner.twistAngle}
+                </span>
+              </div>
+
+              <div className="flex flex-col gap-1 text-[11px] text-amber-900 leading-relaxed">
+                <div>
+                  <span className="font-medium text-amber-950">Piece: </span>
+                  <span className="font-mono bg-white/70 px-1 py-0.5 rounded border border-amber-200">
+                    {primaryTwistedCorner.positionName} ({primaryTwistedCorner.colorNames})
+                  </span>
+                </div>
+
+                <div className="mt-0.5 text-amber-800">
+                  <span className="font-medium text-amber-950">Physical Fix: </span>
+                  {primaryTwistedCorner.fixInstruction}
+                </div>
+              </div>
+
+              {onFixCornerTwist && (
+                <button
+                  onClick={() =>
+                    onFixCornerTwist(primaryTwistedCorner.cornerIndex, primaryTwistedCorner.fixDirection)
+                  }
+                  className="mt-1 flex items-center justify-center gap-1.5 w-full py-1.5 px-3 rounded-md bg-amber-900 hover:bg-amber-800 text-white font-medium text-xs transition active:scale-95 shadow-xs"
+                >
+                  <Sparkles className="w-3.5 h-3.5 text-yellow-300" />
+                  <span>Auto-Fix This Corner ({primaryTwistedCorner.fixDirection === 'CW' ? 'Rotate Clockwise' : 'Rotate Counter-Clockwise'})</span>
+                </button>
+              )}
             </div>
-          ))}
+          )}
+
+          {/* Specific Edge Flip Diagnostic & Auto-Fix Card */}
+          {hasEdgeParity && primaryFlippedEdge && (
+            <div className="flex flex-col gap-2 p-3 rounded-lg bg-orange-50/70 border border-orange-200 text-orange-950 text-xs">
+              <div className="flex items-start justify-between gap-2">
+                <div className="flex items-center gap-1.5 font-semibold text-orange-900">
+                  <RefreshCcw className="w-4 h-4 text-orange-700 shrink-0" />
+                  <span>Flipped Edge Pinpointed:</span>
+                </div>
+                <span className="text-[10px] font-mono px-1.5 py-0.5 rounded bg-orange-100 text-orange-800 border border-orange-200">
+                  Flipped
+                </span>
+              </div>
+
+              <div className="flex flex-col gap-1 text-[11px] text-orange-900 leading-relaxed">
+                <div>
+                  <span className="font-medium text-orange-950">Piece: </span>
+                  <span className="font-mono bg-white/70 px-1 py-0.5 rounded border border-orange-200">
+                    {primaryFlippedEdge.positionName} ({primaryFlippedEdge.colorNames})
+                  </span>
+                </div>
+
+                <div className="mt-0.5 text-orange-800">
+                  <span className="font-medium text-orange-950">Physical Fix: </span>
+                  {primaryFlippedEdge.fixInstruction}
+                </div>
+              </div>
+
+              {onFixEdgeFlip && (
+                <button
+                  onClick={() => onFixEdgeFlip(primaryFlippedEdge.edgeIndex)}
+                  className="mt-1 flex items-center justify-center gap-1.5 w-full py-1.5 px-3 rounded-md bg-orange-900 hover:bg-orange-800 text-white font-medium text-xs transition active:scale-95 shadow-xs"
+                >
+                  <Sparkles className="w-3.5 h-3.5 text-yellow-300" />
+                  <span>Auto-Fix This Edge Flip</span>
+                </button>
+              )}
+            </div>
+          )}
+
+          {/* General non-parity errors (missing colors, centers) */}
+          {errors
+            .filter(
+              (err) =>
+                !err.toLowerCase().includes('corner twist') &&
+                !err.toLowerCase().includes('edge flip')
+            )
+            .map((err, i) => (
+              <div
+                key={i}
+                className="flex items-start gap-2 p-2 rounded-md bg-neutral-50 border border-neutral-200 text-neutral-700 text-xs leading-snug"
+              >
+                <AlertCircle className="w-3.5 h-3.5 text-neutral-500 shrink-0 mt-0.5" />
+                <span>{err}</span>
+              </div>
+            ))}
         </div>
       ) : (
         <div className="flex items-center gap-2 p-2 rounded-md bg-neutral-50 border border-neutral-200 text-neutral-600 text-xs">
@@ -53,7 +151,7 @@ export const ValidationCard: React.FC<ValidationCardProps> = ({
           <span>
             {isSolved
               ? 'All 6 faces are aligned.'
-              : 'State and parity are valid. Ready for optimal solve.'}
+              : 'All 54 facelets and piece parities are valid. Ready for optimal solve.'}
           </span>
         </div>
       )}

@@ -19,12 +19,47 @@ export interface CubeState {
   B: CubeColor[];
 }
 
+export interface TwistedCornerInfo {
+  cornerIndex: number;
+  name: string; // e.g. "Top-Front-Right (URF)"
+  positionName: string; // e.g. "Top-Front-Right"
+  colors: [CubeColor, CubeColor, CubeColor];
+  colorNames: string; // e.g. "White-Green-Red"
+  twistAngle: string; // e.g. "120° Clockwise"
+  direction: 'CW' | 'CCW';
+  fixDirection: 'CW' | 'CCW';
+  faces: [Face, number, Face, number, Face, number];
+  fixInstruction: string;
+}
+
+export interface FlippedEdgeInfo {
+  edgeIndex: number;
+  name: string; // e.g. "Top-Front (UF)"
+  positionName: string; // e.g. "Top-Front"
+  colors: [CubeColor, CubeColor];
+  colorNames: string; // e.g. "White-Green"
+  faces: [Face, number, Face, number];
+  fixInstruction: string;
+}
+
+export interface ParityDiagnosis {
+  hasCornerTwistParity: boolean;
+  hasEdgeFlipParity: boolean;
+  cornerTwistSum: number;
+  edgeFlipSum: number;
+  twistedCorners: TwistedCornerInfo[];
+  primaryTwistedCorner?: TwistedCornerInfo;
+  flippedEdges: FlippedEdgeInfo[];
+  primaryFlippedEdge?: FlippedEdgeInfo;
+}
+
 export interface ValidationResult {
   valid: boolean;
   canSolve: boolean;
   errors: string[];
   warnings: string[];
   colorCounts: Record<CubeColor, number>;
+  parityDiagnosis?: ParityDiagnosis;
 }
 
 export interface SolutionStep {

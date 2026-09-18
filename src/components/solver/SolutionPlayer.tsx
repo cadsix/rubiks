@@ -17,6 +17,7 @@ import {
   Check,
   Compass,
   Sparkles,
+  AlertCircle,
 } from 'lucide-react';
 
 interface SolutionPlayerProps {
@@ -472,8 +473,17 @@ export const SolutionPlayer: React.FC<SolutionPlayerProps> = ({
               </>
             )
           ) : (
-            <div className="p-3.5 rounded-lg bg-red-50 border border-red-200 text-red-700 text-xs">
-              {solveResult.error || 'Failed to solve cube state. Please check cube validity.'}
+            <div className="flex flex-col gap-2 p-3.5 rounded-lg bg-amber-50/80 border border-amber-200 text-amber-950 text-xs">
+              <div className="font-semibold text-amber-900 flex items-center gap-1.5">
+                <AlertCircle className="w-4 h-4 text-amber-700 shrink-0" />
+                <span>Unable to Solve Configuration</span>
+              </div>
+              <p className="text-[11px] text-amber-900/90 leading-relaxed">
+                {solveResult.error || 'The cube configuration has an impossible physical parity error (e.g. twisted corner or flipped edge).'}
+              </p>
+              <div className="text-[11px] text-amber-800">
+                👉 Please check the <strong>Cube State & Parity</strong> card below to see the exact piece pinpointed and auto-fix it.
+              </div>
             </div>
           )}
         </div>

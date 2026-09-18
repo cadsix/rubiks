@@ -11,6 +11,7 @@ interface CubeNet2DProps {
   onPaint: (face: Face, index: number) => void;
   lockCenters?: boolean;
   onToggleLockCenters?: () => void;
+  highlightFacelets?: Array<{ face: Face; index: number }>;
 }
 
 interface FaceBoxProps {
@@ -20,6 +21,7 @@ interface FaceBoxProps {
   onPaint: (face: Face, index: number) => void;
   isDragging: boolean;
   setIsDragging: (val: boolean) => void;
+  highlightIndices?: Set<number>;
 }
 
 const FaceBox: React.FC<FaceBoxProps> = ({
@@ -28,6 +30,7 @@ const FaceBox: React.FC<FaceBoxProps> = ({
   onPaint,
   isDragging,
   setIsDragging,
+  highlightIndices,
 }) => {
   const handleTileClick = (idx: number) => {
     playClickSound();
@@ -61,6 +64,7 @@ const FaceBox: React.FC<FaceBoxProps> = ({
         {tiles.map((color, idx) => {
           const isCenter = idx === 4;
           const hex = COLOR_HEX[color] || '#e5e5e5';
+          const isHighlighted = highlightIndices?.has(idx);
 
           return (
             <button
@@ -68,12 +72,18 @@ const FaceBox: React.FC<FaceBoxProps> = ({
               type="button"
               onClick={() => handleTileClick(idx)}
               onPointerEnter={() => handlePointerEnter(idx)}
-              className="w-7 h-7 sm:w-8 sm:h-8 rounded-[5px] transition-all flex items-center justify-center border hover:scale-[1.05] hover:z-10 border-black/10 active:scale-95 shadow-xs cursor-pointer"
+              className={`w-7 h-7 sm:w-8 sm:h-8 rounded-[5px] transition-all flex items-center justify-center border hover:scale-[1.05] hover:z-10 active:scale-95 shadow-xs cursor-pointer ${
+                isHighlighted
+                  ? 'border-amber-500 ring-2 ring-amber-400 ring-offset-1 animate-pulse z-10'
+                  : 'border-black/10'
+              }`}
               style={{
                 backgroundColor: hex,
                 boxShadow: 'inset 0 1px 1px rgba(255,255,255,0.4)',
               }}
-              title={`Face ${face} #${idx + 1}${isCenter ? ' (Center)' : ''}`}
+              title={`Face ${face} #${idx + 1}${isCenter ? ' (Center)' : ''}${
+                isHighlighted ? ' (Twisted Piece)' : ''
+              }`}
             >
               {isCenter && (
                 <div className="w-1.5 h-1.5 rounded-full bg-black/20" />
@@ -90,8 +100,17 @@ export const CubeNet2D: React.FC<CubeNet2DProps> = ({
   state,
   activeColor,
   onPaint,
+  highlightFacelets = [],
 }) => {
   const [isDragging, setIsDragging] = useState(false);
+
+  const getHighlightIndices = (face: Face): Set<number> => {
+    const set = new Set<number>();
+    highlightFacelets.forEach((hf) => {
+      if (hf.face === face) set.add(hf.index);
+    });
+    return set;
+  };
 
   return (
     <div
@@ -109,10 +128,10 @@ export const CubeNet2D: React.FC<CubeNet2DProps> = ({
         </span>
       </div>
 
-      {/* Unfolded Net Grid */}
-      <div className="grid grid-cols-4 gap-1.5 sm:gap-2 max-w-[380px] items-center justify-items-center">
-        {/* Top (U) */}
-        <div className="col-start-2 col-span-1">
+      {/* 2D Unfolded Cross Layout */}
+      <div className="flex flex-col items-center gap-1.5">
+        {/* Top: Up Face */}
+        <div className="flex justify-center">
           <FaceBox
             face="U"
             tiles={state.U}
@@ -120,11 +139,12 @@ export const CubeNet2D: React.FC<CubeNet2DProps> = ({
             onPaint={onPaint}
             isDragging={isDragging}
             setIsDragging={setIsDragging}
+            highlightIndices={getHighlightIndices('U')}
           />
         </div>
 
-        {/* Middle Row (L, F, R, B) */}
-        <div className="col-span-4 grid grid-cols-4 gap-1.5 sm:gap-2 w-full">
+        {/* Middle Row: Left, Front, Right, Back */}
+        <div className="flex items-center gap-1.5">
           <FaceBox
             face="L"
             tiles={state.L}
@@ -132,6 +152,7 @@ export const CubeNet2D: React.FC<CubeNet2DProps> = ({
             onPaint={onPaint}
             isDragging={isDragging}
             setIsDragging={setIsDragging}
+            highlightIndices={getHighlightIndices('L')}
           />
           <FaceBox
             face="F"
@@ -140,6 +161,7 @@ export const CubeNet2D: React.FC<CubeNet2DProps> = ({
             onPaint={onPaint}
             isDragging={isDragging}
             setIsDragging={setIsDragging}
+            highlightIndices={getHighlightIndices('F')}
           />
           <FaceBox
             face="R"
@@ -148,6 +170,7 @@ export const CubeNet2D: React.FC<CubeNet2DProps> = ({
             onPaint={onPaint}
             isDragging={isDragging}
             setIsDragging={setIsDragging}
+            highlightIndices={getHighlightIndices('R')}
           />
           <FaceBox
             face="B"
@@ -156,11 +179,12 @@ export const CubeNet2D: React.FC<CubeNet2DProps> = ({
             onPaint={onPaint}
             isDragging={isDragging}
             setIsDragging={setIsDragging}
+            highlightIndices={getHighlightIndices('B')}
           />
         </div>
 
-        {/* Bottom (D) */}
-        <div className="col-start-2 col-span-1">
+        {/* Bottom: Down Face */}
+        <div className="flex justify-center">
           <FaceBox
             face="D"
             tiles={state.D}
@@ -168,6 +192,7 @@ export const CubeNet2D: React.FC<CubeNet2DProps> = ({
             onPaint={onPaint}
             isDragging={isDragging}
             setIsDragging={setIsDragging}
+            highlightIndices={getHighlightIndices('D')}
           />
         </div>
       </div>
